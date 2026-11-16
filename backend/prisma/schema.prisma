@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -10,4 +8,397 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ----------------------------------------------------
+// ENUMS
+// ----------------------------------------------------
+
+enum UserRole {
+  PATIENT
+  CAREGIVER
+  PARAMEDIC
+  AMBULANCE_DRIVER
+  DISPATCHER
+  DOCTOR
+  HOSPITAL_ADMIN
+  SYSTEM_ADMIN
+}
+
+enum CaseStatus {
+  CREATED
+  DISPATCHING
+  AMBULANCE_ASSIGNED
+  AMBULANCE_EN_ROUTE
+  ARRIVED_AT_SCENE
+  PATIENT_ONBOARD
+  HOSPITAL_SELECTED
+  HOSPITAL_NOTIFIED
+  EN_ROUTE_TO_HOSPITAL
+  ARRIVED_AT_HOSPITAL
+  HANDOVER_IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum CasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AmbulanceType {
+  BLS
+  ALS
+  PATIENT_TRANSPORT
+  NEONATAL
+  OTHER
+}
+
+enum AmbulanceStatus {
+  AVAILABLE
+  ASSIGNED
+  EN_ROUTE
+  AT_SCENE
+  PATIENT_ONBOARD
+  TRANSPORTING
+  OUT_OF_SERVICE
+}
+
+enum HospitalStatus {
+  OPERATIONAL
+  BUSY
+  DIVERTING
+  CLOSED
+}
+
+enum ResourceType {
+  ICU
+  EMERGENCY_BEDS
+  OXYGEN
+  VENTILATORS
+  BLOOD_BANK
+  CT_SCAN
+  MRI
+  CARDIAC_CARE
+  TRAUMA_CARE
+  OPERATING_ROOM
+  OTHER
+}
+
+enum ResourceStatus {
+  AVAILABLE
+  LOW_STOCK
+  UNAVAILABLE
+  MAINTENANCE
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  ACCEPTED
+  REJECTED
+  EN_ROUTE
+  ARRIVED_AT_SCENE
+  PATIENT_ONBOARD
+  COMPLETED
+  CANCELLED
+}
+
+enum HandoverStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum CaseEventType {
+  SOS_INITIATED
+  CASE_CREATED
+  AMBULANCE_ASSIGNED
+  AMBULANCE_ACCEPTED
+  AMBULANCE_REJECTED
+  AMBULANCE_EN_ROUTE
+  ARRIVED_AT_SCENE
+  PATIENT_ONBOARD
+  HOSPITAL_SELECTED
+  HOSPITAL_NOTIFIED
+  HOSPITAL_ACCEPTED
+  HOSPITAL_REDIRECTED
+  DESTINATION_CHANGED
+  CONDITION_UPDATED
+  DELAY_REPORTED
+  PATIENT_ARRIVED
+  HANDOVER_STARTED
+  HANDOVER_COMPLETED
+  CASE_COMPLETED
+  CASE_CANCELLED
+}
+
+// ----------------------------------------------------
+// MODELS
+// ----------------------------------------------------
+
+model User {
+  id       String   @id @default(uuid())
+  email    String?  @unique
+  phone    String?  @unique
+  name     String
+  role     UserRole @default(PATIENT)
+  isActive Boolean  @default(true)
+
+  // Hospital association (for DOCTOR, HOSPITAL_ADMIN)
+  hospitalId String?
+  hospital   Hospital? @relation("HospitalStaff", fields: [hospitalId], references: [id], onDelete: SetNull)
+
+  // Ambulance crew assignment (for PARAMEDIC, AMBULANCE_DRIVER)
+  ambulanceId String?
+  ambulance   Ambulance? @relation("AmbulanceCrew", fields: [ambulanceId], references: [id], onDelete: SetNull)
+
+  // Optional 1-to-1 profile if user is registered as a patient
+  patientProfile Patient?
+
+  // Relations
+  initiatedCases        EmergencyCase[] @relation("InitiatedByUser")
+  dispatchedAssignments Assignment[]    @relation("DispatcherAssignments")
+  paramedicHandovers    Handover[]      @relation("ParamedicHandovers")
+  doctorHandovers       Handover[]      @relation("DoctorHandovers")
+  caseEvents            CaseEvent[]     @relation("ActorEvents")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+  @@index([isActive])
+  @@index([hospitalId])
+  @@index([ambulanceId])
+}
+
+model Patient {
+  id     String  @id @default(uuid())
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  fullName          String
+  dateOfBirth       DateTime?
+  gender            String?
+  bloodGroup        String?
+  phoneNumber       String?
+  emergencyContact  String?
+  medicalHistory    String?
+  allergies         String?
+  currentMedication String?
+
+  emergencyCases EmergencyCase[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phoneNumber])
+  @@index([fullName])
+}
+
+model EmergencyCase {
+  id         String       @id @default(uuid())
+  caseNumber String       @unique
+  priority   CasePriority @default(HIGH)
+  status     CaseStatus   @default(CREATED)
+
+  incidentLatitude  Float
+  incidentLongitude Float
+  incidentAddress   String
+  symptoms          String?
+  notes             String?
+  currentCondition  String?
+
+  // Patient relation (optional: unidentified patient at SOS initiation)
+  patientId String?
+  patient   Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+
+  // Initiator relation (patient, caregiver, dispatcher, bystander)
+  initiatorId String?
+  initiator   User?   @relation("InitiatedByUser", fields: [initiatorId], references: [id], onDelete: SetNull)
+
+  // Destination hospital (selected during dispatch/transport)
+  destinationHospitalId String?
+  destinationHospital   Hospital? @relation("DestinationHospitalCases", fields: [destinationHospitalId], references: [id], onDelete: SetNull)
+
+  // Operational lifecycle and audit trail
+  assignments Assignment[]
+  handovers   Handover[]
+  events      CaseEvent[]
+
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([patientId])
+  @@index([initiatorId])
+  @@index([destinationHospitalId])
+}
+
+model Ambulance {
+  id                 String          @id @default(uuid())
+  registrationNumber String          @unique
+  callSign           String          @unique
+  type               AmbulanceType   @default(BLS)
+  status             AmbulanceStatus @default(AVAILABLE)
+  currentLatitude    Float?
+  currentLongitude   Float?
+  isAvailable        Boolean         @default(true)
+
+  // Base hospital affiliation
+  hospitalId   String?
+  baseHospital Hospital? @relation("HospitalAmbulances", fields: [hospitalId], references: [id], onDelete: SetNull)
+
+  // Crew & Assignments
+  crew        User[]       @relation("AmbulanceCrew")
+  assignments Assignment[]
+  handovers   Handover[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([isAvailable])
+  @@index([type])
+  @@index([hospitalId])
+}
+
+model Hospital {
+  id                  String         @id @default(uuid())
+  name                String
+  code                String         @unique
+  address             String
+  latitude            Float
+  longitude           Float
+  emergencyCapability String?
+  status              HospitalStatus @default(OPERATIONAL)
+  phone               String?
+  email               String?
+
+  resources      HospitalResource[]
+  staff          User[]             @relation("HospitalStaff")
+  baseAmbulances Ambulance[]        @relation("HospitalAmbulances")
+  incomingCases  EmergencyCase[]    @relation("DestinationHospitalCases")
+  handovers      Handover[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([code])
+}
+
+model HospitalResource {
+  id                String         @id @default(uuid())
+  hospitalId        String
+  hospital          Hospital       @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  type              ResourceType
+  status            ResourceStatus @default(AVAILABLE)
+  quantity          Int            @default(0)
+  availableQuantity Int            @default(0)
+  notes             String?
+
+  lastUpdated DateTime @default(now()) @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([hospitalId, type])
+  @@index([hospitalId])
+  @@index([type])
+  @@index([status])
+}
+
+model Assignment {
+  id     String        @id @default(uuid())
+  caseId String
+  case   EmergencyCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  ambulanceId String
+  ambulance   Ambulance @relation(fields: [ambulanceId], references: [id], onDelete: Cascade)
+
+  dispatcherId String?
+  dispatcher   User?   @relation("DispatcherAssignments", fields: [dispatcherId], references: [id], onDelete: SetNull)
+
+  status AssignmentStatus @default(ASSIGNED)
+
+  assignedAt       DateTime  @default(now())
+  acceptedAt       DateTime?
+  rejectedAt       DateTime?
+  arrivedAtSceneAt DateTime?
+  patientOnboardAt DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([ambulanceId])
+  @@index([dispatcherId])
+  @@index([status])
+  @@index([assignedAt])
+}
+
+model Handover {
+  id     String        @id @default(uuid())
+  caseId String
+  case   EmergencyCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  ambulanceId String
+  ambulance   Ambulance @relation(fields: [ambulanceId], references: [id], onDelete: Cascade)
+
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  paramedicId String?
+  paramedic   User?   @relation("ParamedicHandovers", fields: [paramedicId], references: [id], onDelete: SetNull)
+
+  receivingDoctorId String?
+  receivingDoctor   User?   @relation("DoctorHandovers", fields: [receivingDoctorId], references: [id], onDelete: SetNull)
+
+  status           HandoverStatus @default(PENDING)
+  clinicalSummary  String?
+  patientCondition String?
+  vitals           Json?
+  notes            String?
+
+  handoverStartedAt   DateTime  @default(now())
+  handoverCompletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([ambulanceId])
+  @@index([hospitalId])
+  @@index([paramedicId])
+  @@index([receivingDoctorId])
+  @@index([status])
+}
+
+model CaseEvent {
+  id     String        @id @default(uuid())
+  caseId String
+  case   EmergencyCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  eventType CaseEventType
+  actorId   String?
+  actor     User?         @relation("ActorEvents", fields: [actorId], references: [id], onDelete: SetNull)
+
+  payload Json?
+  notes   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([caseId, createdAt])
+  @@index([eventType])
+  @@index([actorId])
 }

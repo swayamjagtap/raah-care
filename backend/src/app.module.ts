@@ -6,6 +6,7 @@ import { AssignmentsModule } from './assignments/assignments.module.js';
 import { EmergenciesModule } from './emergencies/emergencies.module.js';
 import { HospitalsModule } from './hospitals/hospitals.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { AllocationModule } from './allocation/allocation.module.js';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
     AmbulancesModule,
     AssignmentsModule,
     HospitalsModule,
+    AllocationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

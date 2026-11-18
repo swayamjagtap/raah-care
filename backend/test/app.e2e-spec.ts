@@ -6,7 +6,7 @@ import { vi, describe, beforeEach, it, afterEach } from 'vitest';
 import { AppModule } from './../src/app.module.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 
-describe('AppController, Emergencies, Ambulances & Assignments (e2e)', () => {
+describe('AppController, Emergencies, Ambulances, Assignments & Hospitals (e2e)', () => {
   let app: INestApplication<App>;
   let prismaMock: {
     $connect: ReturnType<typeof vi.fn>;
@@ -36,7 +36,19 @@ describe('AppController, Emergencies, Ambulances & Assignments (e2e)', () => {
       update: ReturnType<typeof vi.fn>;
     };
     hospital: {
+      create: ReturnType<typeof vi.fn>;
+      count: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
       findUnique: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+    };
+    hospitalResource: {
+      create: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
+      findUnique: ReturnType<typeof vi.fn>;
+      findFirst: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
     };
     caseEvent: {
       create: ReturnType<typeof vi.fn>;
@@ -73,7 +85,19 @@ describe('AppController, Emergencies, Ambulances & Assignments (e2e)', () => {
         update: vi.fn(),
       },
       hospital: {
+        create: vi.fn(),
+        count: vi.fn(),
+        findMany: vi.fn(),
         findUnique: vi.fn(),
+        update: vi.fn(),
+      },
+      hospitalResource: {
+        create: vi.fn(),
+        findMany: vi.fn(),
+        findUnique: vi.fn(),
+        findFirst: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
       },
       caseEvent: {
         create: vi.fn(),
@@ -212,6 +236,98 @@ describe('AppController, Emergencies, Ambulances & Assignments (e2e)', () => {
     return request(app.getHttpServer())
       .patch('/api/v1/assignments/00000000-0000-0000-0000-000000000001/status')
       .send({ status: 'INVALID_STATUS' })
+      .expect(400);
+  });
+
+  // ─── Hospitals ───────────────────────────────────────────────────────────
+
+  it('/api/v1/hospitals (POST) rejects empty payload', () => {
+    return request(app.getHttpServer())
+      .post('/api/v1/hospitals')
+      .send({})
+      .expect(400);
+  });
+
+  it('/api/v1/hospitals (POST) rejects non-whitelisted fields', () => {
+    return request(app.getHttpServer())
+      .post('/api/v1/hospitals')
+      .send({
+        name: 'City Care Hospital',
+        code: 'CITY-01',
+        address: '123 Health Ave',
+        latitude: 19.076,
+        longitude: 72.877,
+        unauthorizedField: 'malicious',
+      })
+      .expect(400);
+  });
+
+  it('/api/v1/hospitals (POST) rejects numeric strings for latitude and longitude', () => {
+    return request(app.getHttpServer())
+      .post('/api/v1/hospitals')
+      .send({
+        name: 'City Care Hospital',
+        code: 'CITY-01',
+        address: '123 Health Ave',
+        latitude: '19.076',
+        longitude: '72.877',
+      })
+      .expect(400);
+  });
+
+  it('/api/v1/hospitals (POST) rejects out-of-range coordinates', () => {
+    return request(app.getHttpServer())
+      .post('/api/v1/hospitals')
+      .send({
+        name: 'City Care Hospital',
+        code: 'CITY-01',
+        address: '123 Health Ave',
+        latitude: 95.0,
+        longitude: 190.0,
+      })
+      .expect(400);
+  });
+
+  it('/api/v1/hospitals (GET) returns paginated list', () => {
+    prismaMock.hospital.findMany.mockResolvedValue([]);
+    prismaMock.hospital.count.mockResolvedValue(0);
+
+    return request(app.getHttpServer())
+      .get('/api/v1/hospitals')
+      .expect(200)
+      .expect({
+        data: [],
+        meta: { total: 0, page: 1, limit: 20, totalPages: 0 },
+      });
+  });
+
+  it('/api/v1/hospitals/:id (GET) rejects non-UUID hospital ID', () => {
+    return request(app.getHttpServer())
+      .get('/api/v1/hospitals/not-a-uuid')
+      .expect(400);
+  });
+
+  it('/api/v1/hospitals/:id/resources (POST) rejects non-UUID hospital ID', () => {
+    return request(app.getHttpServer())
+      .post('/api/v1/hospitals/not-a-uuid/resources')
+      .send({
+        type: 'ICU',
+        quantity: 10,
+        availableQuantity: 5,
+      })
+      .expect(400);
+  });
+
+  it('/api/v1/hospitals/:id/resources (POST) rejects invalid resource type', () => {
+    return request(app.getHttpServer())
+      .post(
+        '/api/v1/hospitals/00000000-0000-0000-0000-000000000001/resources',
+      )
+      .send({
+        type: 'INVALID_TYPE',
+        quantity: 10,
+        availableQuantity: 5,
+      })
       .expect(400);
   });
 });

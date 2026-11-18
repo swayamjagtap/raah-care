@@ -302,6 +302,7 @@ model HospitalResource {
   status            ResourceStatus @default(AVAILABLE)
   quantity          Int            @default(0)
   availableQuantity Int            @default(0)
+  version           Int            @default(0)
   notes             String?
 
   lastUpdated DateTime @default(now()) @updatedAt

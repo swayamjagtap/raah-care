@@ -268,6 +268,30 @@ describe('Allocation DTO Validation', () => {
       ).toBe(true);
     });
 
+    it('rejects override reasons shorter than 10 characters', async () => {
+      const dto = plainToInstance(SelectDestinationDto, {
+        hospitalId: validHospitalId,
+        overrideReason: 'Too short',
+      });
+      const errors = await validate(dto);
+
+      expect(errors.some((error) => error.property === 'overrideReason')).toBe(
+        true,
+      );
+    });
+
+    it('rejects whitespace-only override reasons', async () => {
+      const dto = plainToInstance(SelectDestinationDto, {
+        hospitalId: validHospitalId,
+        overrideReason: '          ',
+      });
+      const errors = await validate(dto);
+
+      expect(errors.some((error) => error.property === 'overrideReason')).toBe(
+        true,
+      );
+    });
+
     it('rejects override reasons longer than 2000 characters', async () => {
       const dto = plainToInstance(SelectDestinationDto, {
         hospitalId: validHospitalId,

@@ -1,0 +1,34 @@
+import { Transform } from 'class-transformer';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+
+export class CancelHandoverDto {
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(10, {
+    message: 'Cancellation reason must contain at least 10 characters',
+  })
+  @MaxLength(2000)
+  reason!: string;
+
+  @IsOptional()
+  @IsUUID()
+  actorId?: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
+}

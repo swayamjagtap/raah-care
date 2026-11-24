@@ -3,6 +3,12 @@
 **RAAH + CARE** is a resource-aware emergency care coordination platform
 connecting patients, caregivers, ambulances, dispatchers, and hospitals.
 
+The platform provides dedicated role-based portals for four primary user groups:
+- **Patient Portal:** Emergency requests, Cura Card emergency identification, and real-time response tracking.
+- **Ambulance Portal:** Driver and paramedic navigation, assignment acceptance/rejection, mission updates, and digital handover initiation.
+- **Hospital Portal:** Resource tracking (ICU beds, oxygen, ventilators), incoming emergency visibility, and patient handover reception.
+- **Admin / Dispatcher Portal:** System-wide operational monitoring, assisted dispatching, hospital allocation decision-support, and destination management.
+
 The project brings together emergency requests, ambulance allocation,
 hospital resource awareness, real-time coordination, and digital patient
 handover.
@@ -243,6 +249,39 @@ The following routes are currently implemented.
 | `PATCH` | `/api/v1/assignments/:id/reject` | Reject an assignment |
 | `PATCH` | `/api/v1/assignments/:id/status` | Update assignment status |
 
+### Hospitals and Resources
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/hospitals` | Register a hospital |
+| `GET` | `/api/v1/hospitals` | List hospitals |
+| `GET` | `/api/v1/hospitals/:id` | Get a hospital |
+| `PATCH` | `/api/v1/hospitals/:id` | Update hospital details |
+| `POST` | `/api/v1/hospitals/:id/resources` | Create a hospital resource |
+| `GET` | `/api/v1/hospitals/:id/resources` | List hospital resources |
+| `PATCH` | `/api/v1/hospitals/:id/resources/:resourceId` | Update resource status and quantity |
+
+### Allocation & Recommendations (M5.3 Stage 2)
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/emergencies/:id/ambulance-recommendations` | Score and rank candidate ambulances |
+| `GET` | `/api/v1/emergencies/:id/hospital-recommendations` | Score and rank destination hospitals |
+| `PATCH` | `/api/v1/emergencies/:id/destination` | Select/reassign hospital with safety and concurrency guards |
+
+### Patient Handover (M5.4)
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/handovers` | Initiate patient handover at destination hospital |
+| `GET` | `/api/v1/handovers/:id` | Get handover record details |
+| `GET` | `/api/v1/handovers/case/:caseId/active` | Get current active handover for an emergency case |
+| `GET` | `/api/v1/handovers/case/:caseId` | List all handovers for an emergency case |
+| `PATCH` | `/api/v1/handovers/:id` | Update handover notes, vitals, or clinical summary |
+| `POST` | `/api/v1/handovers/:id/complete` | Complete handover, resolve case, and release ambulance |
+| `POST` | `/api/v1/handovers/:id/reject` | Reject handover, preserve hospital arrival, retain ambulance |
+| `POST` | `/api/v1/handovers/:id/cancel` | Cancel handover, preserve hospital arrival, retain ambulance |
+
 ------------------------------------------------------------------------
 
 ## Current emergency workflow
@@ -253,7 +292,7 @@ The implemented backend supports the following core flow:
 Emergency created
        |
        v
-Dispatcher assigns an ambulance
+Dispatcher assigns an ambulance (or uses M5.3 recommendations)
        |
        v
 Ambulance accepts the assignment
@@ -268,22 +307,27 @@ Ambulance arrives at the scene
 Patient is onboard
        |
        v
-Hospital and transport workflow
+Hospital recommendation & destination selected (M5.3)
        |
        v
-Patient handover
+Ambulance en route to hospital & arrives at hospital
        |
        v
-Emergency case completed
+Patient handover initiated, updated, & accepted (M5.4)
+       |
+       v
+Emergency case & assignment completed; ambulance released to available
 ```
 
 Emergency status changes and key workflow actions are recorded as
 `CaseEvent` audit records.
 
-**Note:** Hospital selection, resource-aware hospital allocation, and
-the complete digital handover workflow are future implementation
-milestones; the workflow diagram shows the intended end-to-end
-direction, not a claim that every stage is already implemented.
+**Status Note:** Core emergency case management, ambulance assignments,
+hospital resource management, recommendation and destination selection APIs
+(M5.3 Stage 2), and digital patient handover APIs (M5.4) are fully implemented
+and verified at the backend service and API layer with 276 unit tests and 20
+E2E tests passing. Dedicated frontend portals (`apps/`), remote database
+migration execution, and deployment to production environments remain in progress.
 
 ------------------------------------------------------------------------
 
@@ -480,7 +524,9 @@ local environment files and generated files are not staged.
 
 ## Project status
 
-This README describes the current development setup and implemented
-backend routes. Update the API, workflow, and setup sections whenever
-the implementation changes so that a new contributor can reproduce the
-project on another computer.
+- **Backend Architecture & Foundation (M1–M3):** Core emergencies, ambulances, assignments, hospitals, and hospital resource management are implemented and verified.
+- **Allocation & Recommendations (M5.3):** Ambulance and hospital recommendation APIs along with destination selection, operational safety blocks, and concurrency guards are implemented and verified (241/241 unit tests).
+- **Patient Handover (M5.4):** Complete digital handover lifecycle (initiation, active update, completion/resolution, rejection, cancellation) with transactional state guards, active-handover partial unique index, and dedicated event types is implemented and verified locally (276/276 unit tests, 20/20 E2E tests).
+- **Database Migrations:** All M5.3 schema requirements and M5.4 migrations (`20261124230000_add_active_handover_partial_unique_index`, `20261124231000_add_handover_rejected_cancelled_events`) are version-controlled locally. Remote execution against the Supabase instance is pending deployment.
+- **Portals (M4) & Shared Frontend:** Architecture documented; portal applications in `apps/` are under development.
+- **Auth & RBAC (M8):** Authentication and role-based guards remain deferred.

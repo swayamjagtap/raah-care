@@ -9,6 +9,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  MinLength,
 } from 'class-validator';
 
 function transformCommaSeparated(value: unknown): unknown {
@@ -31,7 +32,11 @@ export class SelectDestinationDto {
   hospitalId!: string;
 
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
+  @MinLength(10)
   @MaxLength(2000)
   overrideReason?: string;
 

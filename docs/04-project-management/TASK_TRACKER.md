@@ -35,7 +35,7 @@ The tracker should be updated as work progresses and should reflect actual imple
 | Remote handover migration deployment | PENDING | Deploy 20261124230000 and 20261124231000 to remote Supabase database |
 | Handover authentication & RBAC protection | M8 / FUTURE | Guard endpoints and extract authenticated caller identity into audit events |
 | PostgreSQL handover concurrency integration testing | PENDING / FUTURE | Live multi-connection race condition tests against real PostgreSQL |
-| Full cross-module handover E2E journey | M6 / FUTURE | End-to-end HTTP integration test across emergency, assignment, destination, and handover |
+| Full cross-module handover E2E journey (M6.1) | COMPLETED | Verified via mocked-Prisma HTTP harness in lifecycle.e2e-spec.ts (14 tests). Stateful database lifecycle pending (M6.2). |
 | Hospital resource reservation & intake lifecycle | PENDING / FUTURE | Follow-up to M5.3: bed/resource lock upon formal hospital intake acceptance |
 | En-route ambulance GPS for hospital recommendations | PENDING / FUTURE | Follow-up to M5.3: dynamic transit origin coordinates with incident fallback |
 
@@ -64,7 +64,8 @@ The tracker should be updated as work progresses and should reflect actual imple
 | PostgreSQL destination concurrency integration testing | PENDING / FUTURE | Follow-up to M5.3: live multi-connection race condition tests against real PostgreSQL |
 | Real-time notifications | TO VERIFY | Not confirmed |
 | GPS-based live tracking | TO VERIFY | Not confirmed |
-| End-to-end testing | NOT STARTED / TO VERIFY | Test complete emergency journey |
+| Cross-module HTTP lifecycle E2E testing (M6.1) | COMPLETED | Verified 13-step emergency journey using mocked-Prisma harness (34/34 E2E passed). No real database used. |
+| Stateful database-backed E2E testing (M6.2) | PENDING / FUTURE | End-to-end testing against live PostgreSQL/Supabase database instance |
 | Security and access-control testing | NOT STARTED / TO VERIFY | Validate role restrictions |
 
 ## 6. Documentation Tasks

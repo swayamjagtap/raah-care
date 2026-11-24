@@ -18,6 +18,12 @@ The changelog tracks meaningful project-level changes. It does not replace Git c
 
 ### Development
 
+- **25 November 2026 — M6.1 Cross-Module Emergency Lifecycle E2E Integration:**
+  - Implemented comprehensive 13-step HTTP lifecycle end-to-end integration test in `backend/test/lifecycle.e2e-spec.ts`.
+  - Verified full operational sequence: case creation (`POST /emergencies`), dispatch transition (`PATCH /emergencies/:id/status`), ambulance assignment (`POST /emergencies/:id/assignments`), driver acceptance (`PATCH /assignments/:id/accept`), en-route (`PATCH /assignments/:id/status`), scene arrival, patient onboard, hospital recommendation query (`GET /emergencies/:id/hospital-recommendations`), destination selection (`PATCH /emergencies/:id/destination`), hospital en-route and arrival transitions, handover initiation (`POST /handovers`), and handover completion with case resolution and ambulance fleet release.
+  - Verified lifecycle architecture contract: assignment status updates automatically advance case status up to `PATIENT_ONBOARD`; hospital transit and arrival phases are driven through the emergency status endpoint.
+  - Test verification: 14/14 lifecycle E2E tests passing, 34/34 full E2E suite passing, 276/276 unit tests passing, `npm run build` passing, `npx tsc --noEmit` passing.
+  - Scope boundary: Uses the existing mocked-Prisma NestJS HTTP test harness; no real PostgreSQL/Supabase database was used. This verifies cross-module HTTP integration, not a stateful database-backed lifecycle.
 - **24 November 2026 — M5.4 Patient Handover Implementation & Event Semantics Correction:**
   - Implemented the complete `HandoversModule` (`HandoversController`, `HandoversService`, DTOs) supporting the digital transfer of care lifecycle between ambulance crews and hospital receiving staff.
   - Implemented `POST /api/v1/handovers` (initiate handover): enforces prerequisite case state `ARRIVED_AT_HOSPITAL`, active assignment with `PATIENT_ONBOARD`, transitions case to `HANDOVER_IN_PROGRESS`, and emits `HANDOVER_STARTED`.

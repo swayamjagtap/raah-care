@@ -18,7 +18,9 @@ Milestone completion must be based on verified implementation, not merely on doc
 | M5.3 Stage 1 | Allocation DTO foundation | Completed |
 | M5.3 Stage 2 | Allocation recommendation APIs | Conditionally Accepted |
 | M5.4 | Patient Handover | Conditionally Accepted |
-| M6 | End-to-end integration and testing | Pending |
+| M6 | End-to-end integration and testing | In progress |
+| M6.1 | Cross-module HTTP lifecycle E2E testing | Completed |
+| M6.2 | Stateful database lifecycle & integration testing | Pending |
 | M7 | Final validation and deployment preparation | Pending |
 
 The historical milestone labels are an organisational overview and must be reconciled with the actual Git history and team records before being treated as formally completed.
@@ -131,9 +133,47 @@ The following items are tracked as prerequisites for full production acceptance 
 3. **Real PostgreSQL Concurrency Integration Testing:**
    - Concurrency protection was verified via mocked Prisma unit tests (`P2002`). Live multi-connection parallel request verification under real PostgreSQL database contention remains a future integration/production-readiness task.
 4. **End-to-End Handover Journey:**
-   - Full cross-module HTTP integration testing across the complete lifecycle (`/emergencies` → `/assignments` → `/destination` → `/handovers` → `/complete`) remains part of the later integration milestone (M6).
+   - Full cross-module HTTP integration testing across the complete lifecycle (`/emergencies` → `/assignments` → `/destination` → `/handovers` → `/complete`) was verified in M6.1 using the mocked HTTP test harness. Stateful multi-session database verification remains tracked under M6.2.
 
-## 5. Integration Milestone
+## 5. M6.1 – Cross-Module Lifecycle E2E Integration
+
+**Status: Completed**
+
+The first stage of Milestone M6 implemented and verified the complete cross-module HTTP emergency lifecycle journey through automated end-to-end testing.
+
+### Verified M6.1 Functionality
+- Primary test file: `backend/test/lifecycle.e2e-spec.ts`.
+- 13-step end-to-end HTTP lifecycle journey executed in sequence:
+  1. Emergency creation (`POST /api/v1/emergencies` → `CREATED`).
+  2. Dispatch transition (`PATCH /api/v1/emergencies/:id/status` → `DISPATCHING`).
+  3. Ambulance assignment (`POST /api/v1/emergencies/:id/assignments` → `ASSIGNED`, case → `AMBULANCE_ASSIGNED`).
+  4. Driver acceptance (`PATCH /api/v1/assignments/:id/accept` → `ACCEPTED`).
+  5. En-route response (`PATCH /api/v1/assignments/:id/status` with `EN_ROUTE` → case auto-driven to `AMBULANCE_EN_ROUTE`).
+  6. Scene arrival (`PATCH /api/v1/assignments/:id/status` with `ARRIVED_AT_SCENE` → case auto-driven to `ARRIVED_AT_SCENE`).
+  7. Patient onboard (`PATCH /api/v1/assignments/:id/status` with `PATIENT_ONBOARD` → case auto-driven to `PATIENT_ONBOARD`).
+  8. Hospital recommendation query (`GET /api/v1/emergencies/:id/hospital-recommendations` → ranked recommendation array with eligibility, tier, and disclaimer).
+  9. Destination selection (`PATCH /api/v1/emergencies/:id/destination` → `HOSPITAL_SELECTED`, destination assigned).
+  10. Hospital transit (`PATCH /api/v1/emergencies/:id/status` → `EN_ROUTE_TO_HOSPITAL`).
+  11. Hospital arrival (`PATCH /api/v1/emergencies/:id/status` → `ARRIVED_AT_HOSPITAL`).
+  12. Handover initiation (`POST /api/v1/handovers` → `IN_PROGRESS`, case → `HANDOVER_IN_PROGRESS`, `HANDOVER_STARTED` event).
+  13. Handover completion (`POST /api/v1/handovers/:id/complete` → `COMPLETED`, case → `COMPLETED` with `resolvedAt`, assignment → `COMPLETED`, ambulance released to `AVAILABLE` with `isAvailable: true`, `HANDOVER_COMPLETED` and `CASE_COMPLETED` events).
+- Architectural validation: Confirmed that assignment status transitions drive case status up to `PATIENT_ONBOARD`; hospital transit and arrival phases are intentionally driven through the emergency status endpoint.
+
+### Verification Evidence
+- Lifecycle E2E suite: 14/14 passed (`backend/test/lifecycle.e2e-spec.ts`).
+- Full E2E suite: 34/34 passed (`test/lifecycle.e2e-spec.ts` + `test/app.e2e-spec.ts`).
+- Unit test suite: 276/276 passed (17 test files).
+- TypeScript compilation: `npx tsc --noEmit` passed cleanly.
+- Production build: `npm run build` (`nest build`) passed cleanly with exit code 0.
+- Linting: 0 warnings, 0 errors in `lifecycle.e2e-spec.ts`.
+
+### Scope Boundary & Limitations
+- **Mocked Harness:** Tests use the existing mocked-Prisma NestJS HTTP test harness (`overrideProvider(PrismaService)`).
+- **No Real Database:** No real PostgreSQL/Supabase database was used or connected during execution.
+- **Contract Verification:** This verifies cross-module HTTP integration, request validation, response payloads, and transactional orchestration contracts—not a stateful database-backed lifecycle.
+- **Milestone Status:** M6.1 is completed. The broader M6 milestone remains in progress pending real database integration and portal-level end-to-end verification.
+
+## 6. Integration Milestone Requirements
 
 The integration milestone should verify that:
 
@@ -146,7 +186,7 @@ The integration milestone should verify that:
 - Emergency statuses remain consistent.
 - Patient handover and resolution are handled correctly.
 
-## 6. Testing and Validation Milestone
+## 7. Testing and Validation Milestone
 
 Testing should cover:
 
@@ -161,7 +201,7 @@ Testing should cover:
 - Patient information access restrictions.
 - Failure and recovery scenarios.
 
-## 7. Completion Criteria
+## 8. Completion Criteria
 
 A milestone is complete only when:
 
@@ -173,7 +213,7 @@ A milestone is complete only when:
 6. Documentation reflects the actual implementation.
 7. Changes are merged through the agreed Git workflow.
 
-## 8. Updating Milestones
+## 9. Updating Milestones
 
 Update this document whenever a milestone changes.
 

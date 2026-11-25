@@ -18,6 +18,15 @@ The changelog tracks meaningful project-level changes. It does not replace Git c
 
 ### Development
 
+- **25 November 2026 — M6.2 Stateful Database-Backed E2E Integration:**
+  - Implemented `backend/test/lifecycle.db.e2e-spec.ts`: a 14-step stateful emergency lifecycle integration test suite running against a real PostgreSQL database using real `AppModule`, real `PrismaService`, real Prisma queries, and real multi-table ACID transactions.
+  - Database isolation strategy: `@electric-sql/pglite` v0.4.3 (in-process WASM PostgreSQL) + `PGLiteSocketServer` v0.1.3 bound to `127.0.0.1:5434`; all 4 Prisma SQL migrations applied in `beforeAll`; `process.env.DIRECT_URL` redirected before NestJS module compilation; production `PrismaService` unchanged from HEAD.
+  - Seed fixtures: Hospital, 3 HospitalResource rows (`ICU_BED`, `GENERAL_BED`, `OXYGEN_CYLINDER`), Ambulance, Dispatcher, Paramedic, Doctor, Patient.
+  - Stateful lifecycle chain verified: `EmergencyCase` creation → `DISPATCHING` → Ambulance `ASSIGNED` → `ACCEPTED` → `EN_ROUTE` → `ARRIVED_AT_SCENE` → `PATIENT_ONBOARD` → hospital recommendations (real SQL scoring) → destination selection (`HOSPITAL_SELECTED`) → `EN_ROUTE_TO_HOSPITAL` → `ARRIVED_AT_HOSPITAL` → handover initiation (`HANDOVER_IN_PROGRESS`) → handover completion (Handover `COMPLETED`, EmergencyCase `COMPLETED` with `resolvedAt`, Assignment `COMPLETED` with `completedAt`, Ambulance `AVAILABLE` with `isAvailable: true`).
+  - Final state verification: 11 persisted `CaseEvent` records confirmed in chronological order; no active handover remains.
+  - No remote Supabase database was connected, queried, or modified. No application source code changed.
+  - Test verification: 14/14 M6.2 database lifecycle E2E passing; 48/48 full E2E suite passing; 276/276 unit tests passing; `npm run build` clean; `npx tsc --noEmit` clean; `npx oxlint` 0 warnings 0 errors; `git diff --check` clean.
+  - **M6 milestone fully completed.**
 - **25 November 2026 — M6.1 Cross-Module Emergency Lifecycle E2E Integration:**
   - Implemented comprehensive 13-step HTTP lifecycle end-to-end integration test in `backend/test/lifecycle.e2e-spec.ts`.
   - Verified full operational sequence: case creation (`POST /emergencies`), dispatch transition (`PATCH /emergencies/:id/status`), ambulance assignment (`POST /emergencies/:id/assignments`), driver acceptance (`PATCH /assignments/:id/accept`), en-route (`PATCH /assignments/:id/status`), scene arrival, patient onboard, hospital recommendation query (`GET /emergencies/:id/hospital-recommendations`), destination selection (`PATCH /emergencies/:id/destination`), hospital en-route and arrival transitions, handover initiation (`POST /handovers`), and handover completion with case resolution and ambulance fleet release.

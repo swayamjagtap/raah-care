@@ -1,4 +1,4 @@
-﻿# RAAH – Ambulance Workflow
+# RAAH – Ambulance Workflow
 
 ## 1. Purpose
 
@@ -158,16 +158,16 @@ Exceptions must be communicated to the dispatcher and recorded where appropriate
 
 | Capability | Status |
 |---|---|
-| Assignment creation | Existing backend foundation |
-| Assignment retrieval | Existing backend foundation |
-| Driver acceptance | Existing backend foundation |
-| Driver rejection | Existing backend foundation |
-| Assignment status validation | Existing backend foundation |
-| Ambulance availability updates | Existing backend foundation |
-| Driver authentication and portal permissions | Requires verification |
-| GPS-based live tracking | Not verified |
-| Driver notifications | Not verified |
-| Complete pickup-to-handover workflow | Requires implementation/verification |
+| Assignment creation | Verified — `POST /api/v1/emergencies/:emergencyId/assignments` (Assignment module) |
+| Assignment retrieval | Verified — `GET /api/v1/emergencies/:emergencyId/assignments`, `GET /api/v1/assignments/:id` |
+| Driver acceptance | Verified — `PATCH /api/v1/assignments/:id/accept` |
+| Driver rejection | Verified — `PATCH /api/v1/assignments/:id/reject` with mandatory reason |
+| Assignment status validation | Verified — `PATCH /api/v1/assignments/:id/status` drives case and ambulance status |
+| Ambulance availability updates | Verified — Atomic updates across assignment lifecycle (`isAvailable: false` on dispatch, `true` on completion) |
+| Complete pickup-to-handover workflow | Verified — End-to-end integration verified in M6.1 (mocked) and M6.2 (stateful database-backed) |
+| Driver authentication and portal permissions | Requires verification — Deferred to M8 authentication/RBAC |
+| GPS-based live tracking | Not verified — In-transit live GPS polling API not yet implemented |
+| Driver notifications | Not verified — Real-time push/socket not yet confirmed |
 
 ## 10. Related Documents
 

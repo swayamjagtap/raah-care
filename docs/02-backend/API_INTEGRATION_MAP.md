@@ -1,4 +1,4 @@
-﻿# RAAH â€” API Integration Map
+# RAAH â€” API Integration Map
 
 **Document Status:** Draft â€” Requires Current Frontend and Backend Verification
 **Version:** 1.0
@@ -194,7 +194,28 @@ Owns:
 
 The Allocation module recommends candidates and records destination selection.
 
-The Assignment module executes the actual ambulance assignment (`POST /api/v1/assignments`). The Allocation module does not duplicate assignment execution.
+The Assignment module executes the actual ambulance assignment (`POST /api/v1/emergencies/:emergencyId/assignments`). The Allocation module does not duplicate assignment execution.
+
+### 4.6 Handovers Module
+
+**Status:** Verified Operational API (M5.4 Implemented & Accepted; M6.1 / M6.2 E2E Verified)
+
+Owns:
+
+- Handover initiation (`POST /api/v1/handovers`).
+- Handover retrieval and history (`GET /api/v1/handovers/:id`, `GET /api/v1/handovers/case/:caseId/active`, `GET /api/v1/handovers/case/:caseId`).
+- Handover data entry updates (`PATCH /api/v1/handovers/:id`).
+- Handover completion (`POST /api/v1/handovers/:id/complete` — atomic case resolution, assignment completion, ambulance fleet release).
+- Handover rejection (`POST /api/v1/handovers/:id/reject` — hospital rejection, preserves ambulance in `PATIENT_ONBOARD`, case reverts to `ARRIVED_AT_HOSPITAL`).
+- Handover cancellation (`POST /api/v1/handovers/:id/cancel`).
+- Single active handover protection (service-level conflict guard + PostgreSQL partial unique index).
+- Handover lifecycle events (`HANDOVER_STARTED`, `HANDOVER_COMPLETED`, `HANDOVER_REJECTED`, `HANDOVER_CANCELLED`, `CASE_COMPLETED`).
+
+Consumers:
+
+- Ambulance Driver Portal (submits vitals, initiates handover, views active status).
+- Hospital Staff Portal (receives patient, accepts/completes handover, rejects with reason).
+- Admin Portal (monitors handover progress, emergency resolution, and audit history).
 
 ## 5. Core Emergency Integration Flow
 
@@ -330,13 +351,15 @@ Location and status updates must be timestamped and validated.
 
 **Portals:** Ambulance Driver and Hospital Staff
 
-**Backend responsibility:** Handover workflow
+**Backend responsibility:** Handovers (`POST /api/v1/handovers`, `POST /api/v1/handovers/:id/complete`, `reject`, `cancel`)
 
-The driver and hospital submit their required confirmations.
+The paramedic or intake team initiates the handover record (`POST /api/v1/handovers`) once the case is in `ARRIVED_AT_HOSPITAL` and ambulance is in `PATIENT_ONBOARD`.
 
-The backend validates completion and records the handover.
+The receiving hospital doctor accepts and completes the handover (`POST /api/v1/handovers/:id/complete`), atomically completing the handover, resolving the emergency case (`COMPLETED`, `resolvedAt`), completing the assignment (`COMPLETED`, `completedAt`), and releasing the ambulance back to the available fleet (`AVAILABLE`, `isAvailable: true`).
 
-**Integration status:** Required workflow; exact API and model implementation must be verified.
+Alternatively, the hospital may reject (`POST /api/v1/handovers/:id/reject`) or cancel (`POST /api/v1/handovers/:id/cancel`) with a mandatory reason, reverting the case to `ARRIVED_AT_HOSPITAL` while retaining the ambulance in `PATIENT_ONBOARD` for dispatcher rerouting.
+
+**Integration status:** Verified Operational API (M5.4 Implemented & Conditionally Accepted; M6.1 Mocked E2E & M6.2 Stateful DB-backed E2E Verified). Remote Supabase migrations pending deployment.
 
 ### Step 10: Emergency Completion
 
@@ -475,7 +498,7 @@ The backend must validate all operations and return consistent responses.
 - [ ] Assignment rejection verified.
 - [ ] Mission status integration verified.
 - [ ] GPS integration verified.
-- [ ] Handover integration verified.
+- [x] Handover integration verified (backend API layer verified in M5.4 / M6.2; portal UI pending).
 
 ### Hospital Portal
 
@@ -486,7 +509,7 @@ The backend must validate all operations and return consistent responses.
 - [ ] Incoming emergency retrieval verified.
 - [ ] Hospital acknowledgement verified.
 - [ ] Arrival confirmation verified.
-- [ ] Handover integration verified.
+- [x] Handover integration verified (backend API layer verified in M5.4 / M6.2; portal UI pending).
 
 ### Admin Portal
 
@@ -497,9 +520,9 @@ The backend must validate all operations and return consistent responses.
 - [ ] Hospital management verified.
 - [ ] Resource monitoring verified.
 - [x] Allocation integration verified.
-- [ ] Assignment integration verified.
+- [x] Assignment integration verified (backend API layer verified in M6.1 / M6.2).
 - [x] Destination selection verified.
-- [ ] Audit and event history verified.
+- [x] Audit and event history verified (CaseEvent trail verified in M6.1 / M6.2).
 
 ## 11. Integration Completion Criteria
 

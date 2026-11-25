@@ -1,4 +1,4 @@
-﻿# RAAH – Emergency Lifecycle
+# RAAH – Emergency Lifecycle
 
 ## 1. Purpose
 
@@ -61,17 +61,19 @@ The dispatcher should be able to:
 
 ### 4.3 Ambulance Selection and Assignment
 
-The system should identify suitable ambulances based on availability, location and emergency requirements.
+The system identifies suitable ambulances based on availability, location and emergency requirements.
 
 The dispatcher selects an ambulance and initiates an assignment.
 
-**Existing backend foundation:**
-- `POST /emergencies/:emergencyId/assignments`
-- `GET /emergencies/:emergencyId/assignments`
-- Assignment acceptance and rejection endpoints.
-- Assignment status validation and ambulance availability updates.
-
-**Pending:** Recommendation APIs and fully integrated automated ambulance selection.
+**Verified backend implementation:**
+- `POST /api/v1/emergencies/:emergencyId/assignments` — creates assignment with ambulance availability and conflict validation.
+- `GET /api/v1/emergencies/:emergencyId/assignments` — lists assignments for an emergency.
+- `GET /api/v1/assignments/:id` — retrieves a specific assignment.
+- `PATCH /api/v1/assignments/:id/accept` — driver acceptance (transitions assignment to `ACCEPTED`).
+- `PATCH /api/v1/assignments/:id/reject` — driver rejection with mandatory reason.
+- `PATCH /api/v1/assignments/:id/status` — mission status progression (`EN_ROUTE`, `ARRIVED_AT_SCENE`, `PATIENT_ONBOARD`).
+- Assignment status transitions drive corresponding `EmergencyCase` and `Ambulance` status updates atomically.
+- Ambulance recommendation endpoint: `GET /api/v1/emergencies/:id/ambulance-recommendations` (Verified — M5.3 Stage 2).
 
 ### 4.4 Ambulance Response
 
@@ -91,7 +93,9 @@ Relevant information may include:
 - Available beds and resources.
 - Distance and estimated travel time, where supported.
 
-**Pending:** Complete hospital recommendation and destination-selection workflow.
+**Verified backend implementation:**
+- Hospital recommendation endpoint: `GET /api/v1/emergencies/:id/hospital-recommendations` — evaluates hospitals by proximity, operational status, capabilities, and resource availability (Verified — M5.3 Stage 2).
+- Destination selection endpoint: `PATCH /api/v1/emergencies/:id/destination` — selects or reassigns destination hospital with strict operational safety guards, concurrency protection, and audit event logging (Verified — M5.3 Stage 2).
 
 ### 4.6 Arrival and Handover
 
@@ -99,7 +103,7 @@ The ambulance reaches the destination hospital and transfers the patient to auth
 
 The handover should include essential patient information, emergency details and relevant treatment or transport observations.
 
-The handover process is documented separately in `PATIENT_HANDOVER.md`.
+**Verified backend implementation:** See `PATIENT_HANDOVER.md` and Section 10 of `API_ENDPOINTS.md` for the complete implemented handover lifecycle (`POST /api/v1/handovers`, `complete`, `reject`, `cancel`, `GET`, `PATCH`). Verified in M5.4 and M6.1 / M6.2.
 
 ### 4.7 Emergency Resolution
 
@@ -143,17 +147,17 @@ Errors should be visible to the appropriate portal user, and the backend must pr
 
 | Capability | Status |
 |---|---|
-| Emergency creation and retrieval | Existing backend foundation |
-| Emergency status management | Existing backend foundation |
-| Assignment creation and retrieval | Existing backend foundation |
-| Driver acceptance and rejection | Existing backend foundation |
-| Assignment status validation | Existing backend foundation |
-| Ambulance recommendation | Pending implementation |
-| Hospital recommendation | Pending implementation |
-| Destination selection workflow | Pending implementation |
-| Patient live tracking | Not verified |
-| Real-time notifications | Not verified |
-| Complete handover workflow | Not verified |
+| Emergency creation and retrieval | Verified — `POST /api/v1/emergencies`, `GET /api/v1/emergencies`, `GET /api/v1/emergencies/:id` |
+| Emergency status management | Verified — `PATCH /api/v1/emergencies/:id/status` with state-machine validation |
+| Assignment creation and retrieval | Verified — `POST /api/v1/emergencies/:id/assignments`, `GET /api/v1/emergencies/:id/assignments`, `GET /api/v1/assignments/:id` |
+| Driver acceptance and rejection | Verified — `PATCH /api/v1/assignments/:id/accept`, `PATCH /api/v1/assignments/:id/reject` |
+| Assignment status validation | Verified — `PATCH /api/v1/assignments/:id/status` drives case and ambulance status atomically |
+| Ambulance recommendation | Verified — `GET /api/v1/emergencies/:id/ambulance-recommendations` (M5.3 Stage 2) |
+| Hospital recommendation | Verified — `GET /api/v1/emergencies/:id/hospital-recommendations` (M5.3 Stage 2) |
+| Destination selection workflow | Verified — `PATCH /api/v1/emergencies/:id/destination` with safety guards, concurrency control, and audit events (M5.3 Stage 2) |
+| Complete handover workflow | Verified — `POST /api/v1/handovers`, `complete`, `reject`, `cancel`, `GET`, `PATCH` (M5.4); stateful database lifecycle verified (M6.2) |
+| Patient live tracking | Not verified — GPS/location API not confirmed in backend |
+| Real-time notifications | Not verified — WebSocket/SSE not confirmed in backend |
 
 ## 8. Related Documents
 

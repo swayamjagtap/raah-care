@@ -1,4 +1,4 @@
-﻿# RAAH â€” Status Mapping Reference
+# RAAH â€” Status Mapping Reference
 
 **Document Status:** Draft â€” Requires Enum and Transition Verification
 **Version:** 1.0
@@ -31,9 +31,9 @@ Frontend portals may use simpler display labels, but they must map to actual bac
 
 ## 3. Emergency Status
 
-### 3.1 Known Backend Status Values
+### 3.1 Verified Backend Status Values
 
-A previously inspected Emergency lifecycle included the following values:
+The Prisma `CaseStatus` enum in `backend/prisma/schema.prisma` defines the following 13 authoritative values:
 
 | Backend status | General meaning |
 | --- | --- |
@@ -48,11 +48,10 @@ A previously inspected Emergency lifecycle included the following values:
 | `EN_ROUTE_TO_HOSPITAL` | Ambulance travelling to hospital |
 | `ARRIVED_AT_HOSPITAL` | Ambulance arrived at hospital |
 | `HANDOVER_IN_PROGRESS` | Patient handover underway |
-| `COMPLETED` | Emergency completed |
+| `COMPLETED` | Emergency completed and resolved |
+| `CANCELLED` | Emergency cancelled |
 
-**Verification note:** These values were observed in an earlier implementation review. Recheck the current Prisma enum and transition logic before using this table as the final backend contract.
-
-Additional transitions for cancellation, reassignment or exceptional cases may exist and must be verified.
+**Verification status:** Confirmed against `backend/prisma/schema.prisma` and `backend/src/emergencies/emergencies.service.ts`.
 
 ### 3.2 Patient-Facing Display Mapping
 
@@ -72,20 +71,19 @@ The Patient Portal should display simplified, understandable labels.
 | `ARRIVED_AT_HOSPITAL` | Arrived at hospital |
 | `HANDOVER_IN_PROGRESS` | Patient handover in progress |
 | `COMPLETED` | Emergency completed |
+| `CANCELLED` | Request cancelled |
 
 The frontend must not send these display labels to the backend as status values.
 
 ### 3.3 Emergency Transition Requirements
 
-The backend must validate:
+The backend validates:
 
 - Whether the current status allows the requested next status.
 - Whether an ambulance assignment exists where required.
 - Whether the required mission event has occurred.
 - Whether a hospital destination exists where required.
 - Whether handover conditions are satisfied before completion.
-
-The exact transition graph must be extracted from the current Emergency service and tests.
 
 ## 4. Assignment Status
 
@@ -95,165 +93,133 @@ Assignment status represents the lifecycle of an ambulance assignment.
 
 It is distinct from the emergency lifecycle.
 
-### 4.2 Required Conceptual States
+### 4.2 Verified Backend Values (`AssignmentStatus`)
 
-The system requires the ability to represent:
+The Prisma `AssignmentStatus` enum defines the following values:
 
-- Assignment created or pending driver response.
-- Accepted.
-- Rejected.
-- Active mission.
-- Completed.
-- Cancelled or otherwise terminated, where supported.
+| Backend status | Meaning in assignment lifecycle |
+| --- | --- |
+| `ASSIGNED` | Initial assignment created; pending driver response |
+| `ACCEPTED` | Driver accepted the dispatch (`PATCH /api/v1/assignments/:id/accept`) |
+| `REJECTED` | Driver rejected the dispatch (`PATCH /api/v1/assignments/:id/reject`) with mandatory reason |
+| `EN_ROUTE` | Ambulance en route to scene (`PATCH /api/v1/assignments/:id/status`) |
+| `ARRIVED_AT_SCENE` | Ambulance arrived at pickup location |
+| `PATIENT_ONBOARD` | Paramedics have secured patient onboard |
+| `COMPLETED` | Mission completed following successful hospital handover |
+| `CANCELLED` | Assignment cancelled by dispatcher |
 
-**Verification required:** The exact Prisma enum values, service transitions and endpoint behaviour must be inspected before documenting exact backend labels.
+**Allowed transitions:**
+- `ASSIGNED` → `ACCEPTED`, `REJECTED`, `CANCELLED`
+- `ACCEPTED` → `EN_ROUTE`, `CANCELLED`
+- `EN_ROUTE` → `ARRIVED_AT_SCENE`, `CANCELLED`
+- `ARRIVED_AT_SCENE` → `PATIENT_ONBOARD`, `CANCELLED`
+- `PATIENT_ONBOARD` → `COMPLETED`, `CANCELLED`
+- Terminal states: `COMPLETED`, `CANCELLED`, `REJECTED`
 
 ### 4.3 Rules
 
 - Assignment acceptance must be recorded.
-- Rejection must include a reason.
-- An assignment must not be treated as completed merely because an ambulance arrives at the hospital.
-- Assignment transitions must remain consistent with the emergency lifecycle.
-- Conflicting active assignments must be prevented.
+- Rejection must include a reason (stored in assignment notes).
+- An assignment must not be treated as completed merely because an ambulance arrives at the hospital. Arrival at hospital is an emergency case status (`ARRIVED_AT_HOSPITAL`); the assignment remains `PATIENT_ONBOARD` until handover completion.
+- Assignment transitions drive emergency lifecycle status atomically:
+  - `EN_ROUTE` → Case becomes `AMBULANCE_EN_ROUTE`
+  - `ARRIVED_AT_SCENE` → Case becomes `ARRIVED_AT_SCENE`
+  - `PATIENT_ONBOARD` → Case becomes `PATIENT_ONBOARD`
+- Conflicting active assignments must be prevented: only one active assignment (`ASSIGNED`, `ACCEPTED`, `EN_ROUTE`, `ARRIVED_AT_SCENE`, `PATIENT_ONBOARD`) is permitted per ambulance.
 
 ## 5. Ambulance Status
 
 ### 5.1 Purpose
 
-Ambulance status represents vehicle operational availability.
+Ambulance status represents vehicle operational state. It is tracked via two fields in the `Ambulance` model:
+1. `status` (`AmbulanceStatus` enum)
+2. `isAvailable` (boolean operational flag)
 
-It must not be used as a substitute for assignment or emergency status.
+### 5.2 Verified Backend Values (`AmbulanceStatus`)
 
-### 5.2 Proposed Driver-Facing Labels
-
-| Driver-facing label | Meaning |
-| --- | --- |
-| Available | Ambulance can receive a new mission |
-| Off Duty | Driver or ambulance is not on operational duty |
-| Unavailable | Ambulance cannot currently receive a mission |
-
-The mapping to backend enum values must be verified.
+| Backend status | Meaning | `isAvailable` |
+| --- | --- | --- |
+| `AVAILABLE` | Ready for dispatch | `true` |
+| `ASSIGNED` | Assigned to an active emergency | `false` |
+| `EN_ROUTE` | Responding towards incident pickup | `false` |
+| `AT_SCENE` | Arrived at incident location | `false` |
+| `PATIENT_ONBOARD` | Patient loaded in vehicle | `false` |
+| `TRANSPORTING` | In transit to receiving hospital | `false` |
+| `OUT_OF_SERVICE` | Maintenance, shift change, or offline | `false` |
 
 ### 5.3 Rules
 
 - An ambulance with an active assignment must not become available for another conflicting assignment.
-- Driver availability and ambulance availability must not be assumed to be the same field.
-- Vehicle faults may require an unavailable state.
-- The backend must validate status changes.
+- When an assignment is accepted, ambulance status is updated to `ASSIGNED` and `isAvailable: false`.
+- When handover is completed (`POST /api/v1/handovers/:id/complete`), ambulance status is atomically restored to `AVAILABLE` and `isAvailable: true`.
+- If a handover is rejected or cancelled, the ambulance remains in `PATIENT_ONBOARD` and `isAvailable: false` (crew and vehicle are NOT released).
 
 ## 6. Hospital Operational Status
 
 ### 6.1 Purpose
 
-Hospital operational status represents the hospital's ability to receive emergencies.
+Hospital operational status represents the hospital's overall facility readiness to receive emergencies.
 
-### 6.2 Previously Observed Backend Values
+### 6.2 Verified Backend Values (`HospitalStatus`)
 
-An earlier repository inspection identified the following hospital status values:
+The Prisma `HospitalStatus` enum defines the following values:
 
-- `OPERATIONAL`
-- `BUSY`
-- `DIVERTING`
-- `CLOSED`
-
-These values require current schema and service verification.
-
-### 6.3 Proposed Hospital-Facing Labels
-
-The Hospital Portal blueprint proposed:
-
-- Fully Operational.
-- Limited Capacity.
-- Temporarily Unavailable.
-
-These labels are not necessarily equivalent to the backend enum values.
-
-### 6.4 Mapping Decision
-
-A final mapping must be approved by the team.
-
-The following is a conceptual guide, not an approved mapping:
-
-| Proposed hospital-facing label | Potential interpretation |
+| Backend status | Meaning in allocation and routing |
 | --- | --- |
-| Fully Operational | Hospital can receive suitable emergencies |
-| Limited Capacity | Hospital can receive only certain emergencies |
-| Temporarily Unavailable | Hospital should not receive new emergencies |
+| `OPERATIONAL` | Hospital is operating normally and accepting emergency patients |
+| `BUSY` | Hospital is operating near capacity; requires dispatcher review justification (>= 10 chars) |
+| `DIVERTING` | Emergency department is diverting incoming ambulances; **strictly blocked from destination selection** |
+| `CLOSED` | Facility is closed; **strictly blocked from destination selection** |
 
-Do not automatically map `BUSY` to `LIMITED CAPACITY` or `DIVERTING` to `CLOSED` without reviewing their actual business meaning.
+### 6.3 Rules
 
-### 6.5 Rules
-
-- Hospital status changes must influence suitability evaluation.
-- A hospital must be able to report unexpected availability changes.
-- Existing emergency allocations must be reassessed where necessary.
-- Hospital status changes must be recorded.
+- Allocation hard blocks: `CLOSED` and `DIVERTING` hospitals are strictly rejected during destination selection (`PATCH /api/v1/emergencies/:id/destination`). Overrides are not permitted.
+- Dispatcher review: Selecting a hospital in `BUSY` status requires an `overrideReason` of at least 10 non-whitespace characters.
 
 ## 7. Hospital Resource Status
 
-### 7.1 Previously Observed Backend Values
+### 7.1 Verified Backend Values (`ResourceStatus`)
 
-The earlier inspected resource model included:
-
-| Backend value | General meaning |
+| Backend status | General meaning |
 | --- | --- |
-| `AVAILABLE` | Resource available |
-| `LOW_STOCK` | Resource availability or stock is low |
-| `UNAVAILABLE` | Resource unavailable |
-| `MAINTENANCE` | Resource under maintenance |
+| `AVAILABLE` | Resource is in stock and operational |
+| `LOW_STOCK` | Resource quantity is limited; triggers `REQUIRES_REVIEW` during allocation |
+| `UNAVAILABLE` | Resource is depleted or non-operational; **strictly blocks selection if required** |
+| `MAINTENANCE` | Resource is undergoing maintenance; **strictly blocks selection if required** |
 
-Current schema and validation must be checked.
+### 7.2 Resource Types (`ResourceType`)
 
-### 7.2 Resource Status Rules
+`ICU`, `EMERGENCY_BEDS`, `OXYGEN`, `VENTILATORS`, `BLOOD_BANK`, `CT_SCAN`, `MRI`, `CARDIAC_CARE`, `TRAUMA_CARE`, `OPERATING_ROOM`, `OTHER`.
 
-- Resource availability must influence relevant hospital suitability calculations.
-- Resource updates must be validated.
-- Conflicting updates must be handled.
-- Resource history should be retained where required.
+### 7.3 Resource Status Rules
 
-### 7.3 Important Distinction
-
-Resource status is not the same as individual bed occupancy.
-
-For example:
-
-- `AVAILABLE` is a resource availability state.
-- `LOW_STOCK` describes limited stock.
-- `MAINTENANCE` describes maintenance.
-
-Individual bed management may require separate states such as:
-
-- Available.
-- Occupied.
-- Reserved.
-- Under maintenance.
-
-These must not be forced into the same enum without an explicit data-model decision.
+- Allocation hard blocks: If an emergency clinically requires a resource and that resource has `availableQuantity: 0`, status `UNAVAILABLE`, or status `MAINTENANCE`, destination selection is strictly rejected (no override permitted).
+- Concurrency protection: `HospitalResource` uses version-based optimistic locking (`version` field with `@version` semantics).
 
 ## 8. Handover Status
 
 ### 8.1 Purpose
 
-Handover status represents the progress of transferring patient responsibility from ambulance staff to hospital staff.
+Handover status represents the clinical and operational transfer of care from the ambulance crew to the receiving hospital emergency department staff.
 
-### 8.2 Required Conceptual States
+### 8.2 Verified Backend Values (`HandoverStatus`)
 
-The intended workflow requires representation of:
+The Prisma `HandoverStatus` enum defines:
 
-- Not initiated.
-- In progress.
-- Driver confirmation received.
-- Hospital confirmation received.
-- Completed.
-- Exception or cancelled, where supported.
+| Backend status | Meaning |
+| --- | --- |
+| `PENDING` | Reserved initial state |
+| `IN_PROGRESS` | Handover actively initiated (`POST /api/v1/handovers`); case moved to `HANDOVER_IN_PROGRESS` |
+| `COMPLETED` | Hospital doctor accepted patient (`POST /api/v1/handovers/:id/complete`); case resolved |
+| `REJECTED` | Hospital doctor rejected patient (`POST /api/v1/handovers/:id/reject`); case reverts to `ARRIVED_AT_HOSPITAL` |
+| `CANCELLED` | Handover cancelled (`POST /api/v1/handovers/:id/cancel`); case reverts to `ARRIVED_AT_HOSPITAL` |
 
-**Verification required:** The actual handover model, status values and transition rules must be inspected.
+### 8.3 Handover Lifecycle and Atomic State Rules
 
-### 8.3 Completion Rule
-
-The proposed RAAH workflow requires confirmation from both the ambulance driver and hospital staff.
-
-The backend must validate the required confirmations before recording completed handover.
+- **Initiation:** Requires emergency in `ARRIVED_AT_HOSPITAL`, active assignment in `PATIENT_ONBOARD`, and destination hospital set. Transitions case to `HANDOVER_IN_PROGRESS`, emits `HANDOVER_STARTED`.
+- **Single active handover constraint:** At most one active (`PENDING` or `IN_PROGRESS`) handover is permitted per case, enforced by application guard (`409 Conflict`) and PostgreSQL partial unique index (`Handover_active_case_unique`).
+- **Completion:** Hospital doctor accepts patient via `POST /api/v1/handovers/:id/complete`. Inside an atomic transaction: Handover → `COMPLETED`, EmergencyCase → `COMPLETED` (`resolvedAt`), Assignment → `COMPLETED` (`completedAt`), Ambulance → `AVAILABLE` (`isAvailable: true`), and emits `HANDOVER_COMPLETED` and `CASE_COMPLETED`.
+- **Rejection / Cancellation:** Reverts EmergencyCase to `ARRIVED_AT_HOSPITAL`. Ambulance and assignment remain in `PATIENT_ONBOARD` (crew and vehicle are NOT released). Dispatcher can subsequently reassign destination via `PATCH /api/v1/emergencies/:id/destination`.
 
 ## 9. Portal-Specific Display Rules
 
@@ -282,21 +248,21 @@ The exact event structure must follow the existing backend model.
 
 ## 11. Verification Checklist
 
-- [ ] Confirm Emergency Prisma enum.
-- [ ] Confirm Emergency service transition graph.
-- [ ] Confirm Assignment Prisma enum.
-- [ ] Confirm Assignment service transitions.
-- [ ] Confirm Ambulance Prisma enum.
-- [ ] Confirm Ambulance status update validation.
-- [ ] Confirm Hospital Prisma enum.
-- [ ] Confirm Hospital status update validation.
-- [ ] Confirm HospitalResource enum.
-- [ ] Confirm resource update validation.
-- [ ] Confirm Handover model and statuses.
-- [ ] Confirm cancellation and reassignment behaviour.
-- [ ] Confirm case event recording.
-- [ ] Confirm frontend display mapping.
-- [ ] Add automated tests for important transitions.
+- [x] Confirm Emergency Prisma enum (`CaseStatus` 13 values confirmed).
+- [x] Confirm Emergency service transition graph (validated in `EmergenciesService` and E2E tests).
+- [x] Confirm Assignment Prisma enum (`AssignmentStatus` 8 values confirmed).
+- [x] Confirm Assignment service transitions (`AssignmentsService` state machine confirmed).
+- [x] Confirm Ambulance Prisma enum (`AmbulanceStatus` 7 values + `isAvailable` flag confirmed).
+- [x] Confirm Ambulance status update validation (`AmbulancesService` confirmed).
+- [x] Confirm Hospital Prisma enum (`HospitalStatus` 4 values confirmed).
+- [x] Confirm Hospital status update validation (`HospitalsService` confirmed).
+- [x] Confirm HospitalResource enum (`ResourceStatus` 4 values, `ResourceType` 11 values confirmed).
+- [x] Confirm resource update validation (version locking and non-negative constraints confirmed).
+- [x] Confirm Handover model and statuses (`HandoverStatus` 5 values, atomic completion confirmed).
+- [x] Confirm cancellation and reassignment behaviour (rejection/cancellation reverts to `ARRIVED_AT_HOSPITAL`, retains ambulance for rerouting).
+- [x] Confirm case event recording (`CaseEventType` 22 values, chronological audit trail verified).
+- [ ] Confirm frontend display mapping (requires portal implementation review).
+- [x] Add automated tests for important transitions (verified in M5.3, M5.4, M6.1 mocked E2E, and M6.2 stateful DB-backed E2E).
 
 ## 12. Related Documentation
 

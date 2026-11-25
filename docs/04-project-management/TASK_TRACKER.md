@@ -65,7 +65,7 @@ The tracker should be updated as work progresses and should reflect actual imple
 | Real-time notifications | TO VERIFY | Not confirmed |
 | GPS-based live tracking | TO VERIFY | Not confirmed |
 | Cross-module HTTP lifecycle E2E testing (M6.1) | COMPLETED | Verified 13-step emergency journey using mocked-Prisma harness (34/34 E2E passed). No real database used. |
-| Stateful database-backed E2E testing (M6.2) | PENDING / FUTURE | End-to-end testing against live PostgreSQL/Supabase database instance |
+| Stateful database-backed E2E testing (M6.2) | COMPLETED | 14/14 stateful lifecycle tests passing against isolated in-process PGlite PostgreSQL. Real PrismaService, real migrations, real transactions. 48/48 full E2E suite passing. No remote Supabase database used or modified. |
 | Security and access-control testing | NOT STARTED / TO VERIFY | Validate role restrictions |
 
 ## 6. Documentation Tasks

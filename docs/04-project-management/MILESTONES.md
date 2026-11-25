@@ -18,9 +18,9 @@ Milestone completion must be based on verified implementation, not merely on doc
 | M5.3 Stage 1 | Allocation DTO foundation | Completed |
 | M5.3 Stage 2 | Allocation recommendation APIs | Conditionally Accepted |
 | M5.4 | Patient Handover | Conditionally Accepted |
-| M6 | End-to-end integration and testing | In progress |
+| M6 | End-to-end integration and testing | Completed |
 | M6.1 | Cross-module HTTP lifecycle E2E testing | Completed |
-| M6.2 | Stateful database lifecycle & integration testing | Pending |
+| M6.2 | Stateful database lifecycle & integration testing | Completed |
 | M7 | Final validation and deployment preparation | Pending |
 
 The historical milestone labels are an organisational overview and must be reconciled with the actual Git history and team records before being treated as formally completed.
@@ -173,20 +173,103 @@ The first stage of Milestone M6 implemented and verified the complete cross-modu
 - **Contract Verification:** This verifies cross-module HTTP integration, request validation, response payloads, and transactional orchestration contracts—not a stateful database-backed lifecycle.
 - **Milestone Status:** M6.1 is completed. The broader M6 milestone remains in progress pending real database integration and portal-level end-to-end verification.
 
-## 6. Integration Milestone Requirements
+## 6. M6.2 – Stateful Database-Backed E2E Integration
 
-The integration milestone should verify that:
+**Status: Completed**
 
-- Patient requests reach the shared backend.
-- Emergency records are created and retrieved correctly.
-- Dispatcher actions use authorised APIs.
-- Ambulance assignments follow backend validation.
-- Hospital information and resources are available to authorised users.
-- Destination selection is consistent across portals.
-- Emergency statuses remain consistent.
-- Patient handover and resolution are handled correctly.
+The second stage of Milestone M6 implemented and verified a fully stateful emergency lifecycle integration test suite running against a real PostgreSQL database engine, with the real NestJS `AppModule`, real `PrismaService`, real Prisma queries, and real multi-table ACID transactions.
 
-## 7. Testing and Validation Milestone
+### Database Isolation Strategy
+
+- **In-process PostgreSQL engine:** `@electric-sql/pglite` v0.4.3 (WASM PostgreSQL) with `PGLiteSocketServer` v0.1.3, bound to `127.0.0.1:5434` during test execution.
+- **Full migration bootstrap:** All 4 Prisma SQL migrations applied sequentially to the in-memory database in `beforeAll`:
+  - `20261116111709_init`
+  - `20261118025500_add_hospital_resource_version_and_quantity_check`
+  - `20261124230000_add_active_handover_partial_unique_index`
+  - `20261124231000_add_handover_rejected_cancelled_events`
+- **Connection pool configured:** `PGLiteSocketServer` initialised with `maxConnections: 50` to support Prisma 7's `pg.Pool`.
+- **Strict isolation:** `process.env.DIRECT_URL` and `process.env.DATABASE_URL` redirected to `127.0.0.1:5434` before NestJS module compilation. No connection to the remote Supabase database was made.
+- **Safe teardown:** `app.close()`, `prisma.$disconnect()`, and `socketServer.stop()` executed in `afterAll`.
+
+### Verified M6.2 Functionality
+
+- **Primary test file:** `backend/test/lifecycle.db.e2e-spec.ts`.
+- **Seed fixtures seeded in `beforeAll`:** Hospital (`State Trauma Center`), 3 `HospitalResource` rows (`ICU_BED`, `GENERAL_BED`, `OXYGEN_CYLINDER`), Ambulance (`AMB-M6-01`, type `ALS`), Dispatcher, Paramedic, Doctor, and Patient (`Ramesh Kumar`).
+- **14-step stateful lifecycle chain** (each test consumes database state written by prior tests):
+  1. `POST /api/v1/emergencies` → `EmergencyCase` row persisted with `CREATED` status and `CASE_CREATED` event.
+  2. `PATCH /api/v1/emergencies/:id/status` → `DISPATCHING` persisted in DB.
+  3. `POST /api/v1/emergencies/:id/assignments` → `Assignment` row created (`ASSIGNED`), `Ambulance` updated (`ASSIGNED`, `isAvailable: false`), case updated (`AMBULANCE_ASSIGNED`), `AMBULANCE_ASSIGNED` event persisted.
+  4. `PATCH /api/v1/assignments/:id/accept` → `ACCEPTED` with `acceptedAt` timestamp persisted.
+  5. `PATCH /api/v1/assignments/:id/status` (`EN_ROUTE`) → assignment, ambulance, and case all updated transactionally; `AMBULANCE_EN_ROUTE` event persisted.
+  6. `PATCH /api/v1/assignments/:id/status` (`ARRIVED_AT_SCENE`) → ambulance to `AT_SCENE`, case to `ARRIVED_AT_SCENE`; `ARRIVED_AT_SCENE` event persisted.
+  7. `PATCH /api/v1/assignments/:id/status` (`PATIENT_ONBOARD`) → ambulance to `PATIENT_ONBOARD`, case to `PATIENT_ONBOARD`; `PATIENT_ONBOARD` event persisted.
+  8. `GET /api/v1/emergencies/:id/hospital-recommendations` → real SQL scoring query returns seeded hospital with `isEligible: true`.
+  9. `PATCH /api/v1/emergencies/:id/destination` → `destinationHospitalId` persisted on case (`HOSPITAL_SELECTED`); `HOSPITAL_SELECTED` event persisted.
+  10. `PATCH /api/v1/emergencies/:id/status` (`EN_ROUTE_TO_HOSPITAL`) → case status persisted.
+  11. `PATCH /api/v1/emergencies/:id/status` (`ARRIVED_AT_HOSPITAL`) → case status persisted; `PATIENT_ARRIVED` event persisted.
+  12. `POST /api/v1/handovers` → `Handover` row persisted (`IN_PROGRESS`), case updated to `HANDOVER_IN_PROGRESS`; `HANDOVER_STARTED` event persisted.
+  13. `POST /api/v1/handovers/:id/complete` → multi-table ACID transaction: Handover → `COMPLETED` (`handoverCompletedAt` set), EmergencyCase → `COMPLETED` (`resolvedAt` set), Assignment → `COMPLETED` (`completedAt` set), Ambulance → `AVAILABLE` (`isAvailable: true`); `HANDOVER_COMPLETED` and `CASE_COMPLETED` events persisted.
+  14. Comprehensive final DB verification: all terminal statuses confirmed, full `CaseEvent` chronological audit trail verified (11 events), no active handover remains.
+- **No application defects discovered:** All NestJS services, DTOs, service-level guards, state-machine validation, and multi-table transactions functioned correctly against a real PostgreSQL engine.
+
+### Verification Evidence
+
+- M6.2 database lifecycle E2E: **14/14 passed** (`backend/test/lifecycle.db.e2e-spec.ts`).
+- Full E2E suite: **48/48 passed** (3 test files: `lifecycle.e2e-spec.ts`, `app.e2e-spec.ts`, `lifecycle.db.e2e-spec.ts`).
+- Unit test suite: **276/276 passed** (17 test files).
+- TypeScript compilation: `npx tsc --noEmit` passed cleanly.
+- Production build: `npm run build` passed cleanly with exit code 0.
+- Linting: **0 warnings, 0 errors** (`npx oxlint` across 80 files, 96 rules).
+- Whitespace/diff check: `git diff --check` exit 0.
+
+### Scope Boundary & Limitations
+
+- **In-memory WASM PostgreSQL vs. remote multi-region cluster:** Tests run against an isolated, single-node `@electric-sql/pglite` engine rather than the remote multi-region Supabase pooler.
+- **No application source changes:** `PrismaService` is unmodified from HEAD. Database isolation is achieved entirely within the test file by setting `process.env.DIRECT_URL` before NestJS module compilation.
+- **Portal UI integration deferred:** Cross-portal frontend E2E integration (Dispatcher, Paramedic, Hospital Doctor UIs) is scoped to M8 / portal milestones.
+
+## 7. M6 – End-to-End Integration and Testing
+
+**Status: Completed**
+
+Both sub-milestones comprising M6 are now complete:
+
+| Sub-milestone | Description | Status |
+|---|---|---|
+| M6.1 | Cross-module HTTP lifecycle E2E (mocked harness) | Completed |
+| M6.2 | Stateful database-backed E2E (real PostgreSQL via PGlite) | Completed |
+
+### Final M6 Verification Evidence (Combined)
+
+- Full E2E suite: **48/48 passed** (`lifecycle.e2e-spec.ts` 14 + `app.e2e-spec.ts` 20 + `lifecycle.db.e2e-spec.ts` 14).
+- Unit suite: **276/276 passed** (17 test files).
+- Production build: `npm run build` clean (exit 0).
+- TypeScript compilation: `npx tsc --noEmit` clean (exit 0).
+- Linting: **0 warnings, 0 errors** (`npx oxlint` 80 files, 96 rules).
+- Whitespace check: `git diff --check` clean (exit 0).
+
+### Original Integration Milestone Requirements (All Addressed by M6.1 + M6.2)
+
+The integration milestone was defined to verify that:
+
+- Patient requests reach the shared backend. ✅
+- Emergency records are created and retrieved correctly. ✅
+- Dispatcher actions use authorised APIs. ✅
+- Ambulance assignments follow backend validation. ✅
+- Hospital information and resources are available to authorised users. ✅
+- Destination selection is consistent across portals. ✅ (backend API layer)
+- Emergency statuses remain consistent. ✅
+- Patient handover and resolution are handled correctly. ✅
+
+### Next Milestone: M7 – Final Validation and Deployment Preparation
+
+M7 scope covers:
+- Apply pending remote Supabase migrations (`20261124230000`, `20261124231000`).
+- Final documentation consistency review.
+- Pre-production deployment preparation.
+- Authentication/RBAC groundwork (M8 prerequisite).
+
+## 8. Testing and Validation Milestone
 
 Testing should cover:
 
@@ -201,7 +284,7 @@ Testing should cover:
 - Patient information access restrictions.
 - Failure and recovery scenarios.
 
-## 8. Completion Criteria
+## 9. Completion Criteria
 
 A milestone is complete only when:
 
@@ -213,7 +296,7 @@ A milestone is complete only when:
 6. Documentation reflects the actual implementation.
 7. Changes are merged through the agreed Git workflow.
 
-## 9. Updating Milestones
+## 10. Updating Milestones
 
 Update this document whenever a milestone changes.
 

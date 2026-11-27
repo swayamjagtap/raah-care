@@ -33,7 +33,21 @@ The tracker should be updated as work progresses and should reflect actual imple
 | Destination selection API | CONDITIONALLY ACCEPTED | M5.3 Stage 2 (`PATCH /api/v1/emergencies/:id/destination`). Core implementation verified; follow-up items tracked. |
 | Patient Handover module & lifecycle APIs | CONDITIONALLY ACCEPTED | M5.4 (`POST /api/v1/handovers`, `complete`, `reject`, `cancel`, `GET`, `PATCH`). Core implementation & tests verified; follow-ups tracked. |
 | Remote handover migration deployment | PENDING | Deploy 20261124230000 and 20261124231000 to remote Supabase database |
-| Handover authentication & RBAC protection | M8 / FUTURE | Guard endpoints and extract authenticated caller identity into audit events |
+| M8.1 — Prisma identity mapping (`User.supabaseId`) | COMPLETED | Schema updated, migration authored, Prisma client regenerated, 276/276 unit + 48/48 E2E passing. Migration not yet applied to production. |
+| M8.2 — `AuthModule`, `JwtStrategy`, global guards, decorators | COMPLETED | Installed @nestjs/jwt, @nestjs/passport, passport, passport-jwt. Implemented JwtStrategy, JwtAuthGuard, RolesGuard, @Public(), @Roles(), @CurrentUser(). Registered globally in AppModule. 289 unit tests + 53 E2E tests passing. |
+| M8.3 — Public route annotations, optional-auth SOS | COMPLETED | `@Public()` on health; `@OptionalAuth()` on `POST /emergencies`; verified 296 unit + 59 E2E tests. |
+| M8.4 — `@Roles()` applied to all protected routes | COMPLETED | Decorated all protected controller endpoints per M8 blueprint role matrix; 299 unit + 65 E2E tests pass. |
+| M8.5 — Ownership / affiliation guards (service layer) | COMPLETED | Hospital scope, ambulance crew scope, patient ownership. 316/316 unit + 76/76 E2E tests pass. |
+| M8.6 — Remove client-supplied actor IDs; populate from JWT | COMPLETED | 12 DTO fields removed; `CaseEvent.actorId` from `req.user`. 315/315 unit + 81/81 E2E tests pass. |
+| M8.7 — M8 final validation, docs, production migration | COMPLETED | Production migration `20261126000000` applied to Supabase; 315 unit + 81 E2E tests pass. |
+| M9.1 — Supabase Auth User Provisioning & Role Metadata | COMPLETED | UserProvisioningService, AuthController (/auth/me, /auth/users, /auth/users/link); 325 unit + 89 E2E tests pass. |
+| M9.2 — Patient Self-Registration & Supabase Identity Linking | COMPLETED | POST /auth/register, SupabaseJwtAuthGuard, RegisterPatientDto; 335 unit + 99 E2E tests pass. |
+| M9.3 — Patient Emergency History & Navigation Integration | COMPLETED | Real-time emergency tracking, incident history, resolved /login to /register bounce in patient-web. |
+| M9.4 — Patient Clinical Profile APIs (`/patients/me`) | COMPLETED | Implemented PatientsModule, GET/PATCH /api/v1/patients/me, emergency contact persistence. |
+| M9.5 — Secure Cura Card Ephemeral QR & Responder Scanning | COMPLETED | 5-minute ephemeral QR crypto, jsQR HTML5 camera scanners in ambulance-web & hospital-web, CuraCardAudit logging. |
+| M9.6 — Frontend Route Recovery & Local Stability | COMPLETED | Fixed backend entryFile in nest-cli.json, fixed blank screens with defensive fallbacks, restored portal routes. |
+| M9.7 — Database Schema Alignment & Monorepo Pre-Deployment Pass | COMPLETED | Aligned schema.prisma to revokedAt TIMESTAMP(3), Vitest timeouts updated, 438/438 automated tests pass across monorepo. |
+| Handover authentication & RBAC protection | IN PROGRESS (M8) | Covered by M8.4–M8.6. |
 | PostgreSQL handover concurrency integration testing | PENDING / FUTURE | Live multi-connection race condition tests against real PostgreSQL |
 | Full cross-module handover E2E journey (M6.1) | COMPLETED | Verified via mocked-Prisma HTTP harness in lifecycle.e2e-spec.ts (14 tests). Stateful database lifecycle pending (M6.2). |
 | Hospital resource reservation & intake lifecycle | PENDING / FUTURE | Follow-up to M5.3: bed/resource lock upon formal hospital intake acceptance |
@@ -43,15 +57,12 @@ The tracker should be updated as work progresses and should reflect actual imple
 
 | Task | Status | Notes |
 |---|---|---|
-| Patient Portal requirements documentation | DOCUMENTED | Implementation requires separate verification |
-| Ambulance Portal requirements documentation | DOCUMENTED | Implementation requires separate verification |
-| Hospital Portal requirements documentation | DOCUMENTED | Implementation requires separate verification |
-| Admin Portal requirements documentation | DOCUMENTED | Implementation requires separate verification |
-| Patient authentication and access control | TO VERIFY | Role-specific access |
-| Driver authentication and access control | TO VERIFY | Role-specific access |
-| Hospital staff authentication and access control | TO VERIFY | Role-specific access |
-| Admin role permissions | TO VERIFY | Verify existing guards and policies |
-| Portal-to-backend integration | TO VERIFY | Validate endpoint usage |
+| M3 — Frontend Foundation | COMPLETED | Historical foundation. |
+| M4 / M9.3 — Patient Portal Implementation (`apps/patient-web`) | COMPLETED | Patient signup, login, emergency SOS request, live response status, medical profile, Cura Card viewer & QR generator. Port 5173. |
+| Ambulance Portal Implementation (`apps/ambulance-web`) | COMPLETED | Missions, GPS routing, camera-based Cura Card scanner (`jsQR`), digital handover initiation. Port 5174. |
+| Hospital Portal Implementation (`apps/hospital-web`) | COMPLETED | Inbound emergency queue, bed/resource matrix, trauma intake Cura Card scanner, handover reception. Port 5175. |
+| Admin / Dispatch Portal Implementation (`apps/admin-web`) | COMPLETED | Global dispatch supervision, ambulance fleet tracking, hospital diversion status, audit log reviews. Port 5176. |
+| Shared Monorepo Packages | COMPLETED | `@raah/shared-types`, `@raah/auth`, `@raah/api-client` established and linked via workspace protocol. |
 
 ## 5. Integration and Testing Tasks
 

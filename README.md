@@ -1,532 +1,262 @@
 # RAAH + CARE
 
-**RAAH + CARE** is a resource-aware emergency care coordination platform
-connecting patients, caregivers, ambulances, dispatchers, and hospitals.
+**RAAH + CARE** is a resource-aware emergency care coordination platform connecting patients, caregivers, ambulances, dispatchers, and hospitals.
 
-The platform provides dedicated role-based portals for four primary user groups:
-- **Patient Portal:** Emergency requests, Cura Card emergency identification, and real-time response tracking.
-- **Ambulance Portal:** Driver and paramedic navigation, assignment acceptance/rejection, mission updates, and digital handover initiation.
-- **Hospital Portal:** Resource tracking (ICU beds, oxygen, ventilators), incoming emergency visibility, and patient handover reception.
-- **Admin / Dispatcher Portal:** System-wide operational monitoring, assisted dispatching, hospital allocation decision-support, and destination management.
+The platform provides dedicated, role-segregated portals running as independent web applications:
+- **Patient Portal (`apps/patient-web` on port 5173):** Emergency SOS requests, digital Cura Card emergency identification (with 5-minute ephemeral QR tokens and instant revocation), medical profile management, and real-time response tracking.
+- **Ambulance Portal (`apps/ambulance-web` on port 5174):** Paramedic and driver navigation, mission acceptance, live triage updates, HTML5 camera-based QR Cura Card scanner, and digital hospital handover initiation.
+- **Hospital Portal (`apps/hospital-web` on port 5175):** ER bed capacity and critical resource tracking (ICU, Oxygen, Ventilators), inbound emergency visibility, ER camera-based Cura Card scanner, and digital patient reception.
+- **Admin / Control Centre Portal (`apps/admin-web` on port 5176):** System-wide live operational monitoring, assisted dispatching, hospital allocation decision-support, and audit log analysis.
 
-The project brings together emergency requests, ambulance allocation,
-hospital resource awareness, real-time coordination, and digital patient
-handover.
+The system is coordinated by a unified NestJS backend API gateway connected to PostgreSQL (via Prisma ORM) and Supabase Authentication.
 
-------------------------------------------------------------------------
+---
 
-## Project structure
+## Project Structure
 
-``` text
+RAAH-CARE is structured as a **pnpm monorepo**:
+
+```text
 raah-care/
-├── apps/                  # Role-specific frontend applications (planned)
-├── backend/               # NestJS backend API
-│   ├── prisma/             # Prisma schema and migrations
-│   └── src/                # Backend modules and services
-├── packages/               # Shared packages (planned)
-├── database/               # Additional database resources (if needed)
-├── tests/                  # Shared tests (if needed)
-├── docs/                   # Project documentation
-├── package.json            # Root workspace configuration
-├── pnpm-workspace.yaml     # pnpm workspace definition
-├── pnpm-lock.yaml          # Locked dependency versions
-└── README.md
+├── apps/                                  # Independent frontend web applications
+│   ├── patient-web/                       # Port 5173: Patient emergency, profile & Cura Card
+│   ├── ambulance-web/                     # Port 5174: Paramedic missions, triage & QR scanner
+│   ├── hospital-web/                      # Port 5175: ER inbound emergencies, beds & QR scanner
+│   └── admin-web/                         # Port 5176: System admin & dispatch supervisor
+├── backend/                               # NestJS backend API & WebSocket Gateway
+│   ├── prisma/                            # Prisma schema, migrations, and seed script
+│   │   ├── migrations/                    # Tracked database migrations (Supabase auth, Cura Card)
+│   │   ├── schema.prisma                  # PostgreSQL schema with Prisma Client generator
+│   │   └── seed.ts                        # Deterministic seed data (hospitals, beds, ambulances)
+│   ├── generated/prisma/                  # Generated Prisma Client
+│   ├── src/                               # NestJS domain modules
+│   │   ├── auth/                          # Supabase JWT validation, user provisioning, RBAC
+│   │   ├── patients/                      # Patient medical profile CRUD & emergency contacts
+│   │   ├── cura-card/                     # Ephemeral QR token generation, revocation & resolver
+│   │   ├── emergencies/                   # Emergency lifecycle, state machine, triage scoring
+│   │   ├── dispatch/                      # Real-time WebSocket gateway and dispatch engine
+│   │   ├── hospitals/                     # Hospital capacity and bed management
+│   │   ├── responders/                    # Ambulance status and paramedic telemetry
+│   │   ├── handovers/                     # Paramedic-to-doctor digital handover protocols
+│   │   ├── audit/                         # Audit event logging
+│   │   └── database/                      # PrismaService and database transactions
+│   └── test/                              # End-to-end integration test suites
+├── packages/                              # Shared monorepo packages
+│   ├── shared-types/                      # TypeScript contracts, DTOs, and domain enums
+│   ├── auth/                              # Shared Supabase Auth state machine & session hooks
+│   └── api-client/                        # Typed Axios/Fetch API client wrappers
+├── docs/                                  # Comprehensive architecture and workflow documentation
+├── package.json                           # Root scripts (test, build, dev)
+├── pnpm-workspace.yaml                    # Workspace definitions (backend, apps/*, packages/*)
+└── pnpm-lock.yaml                         # Locked dependency versions
 ```
 
-The repository is a **pnpm monorepo**. The backend is implemented with
-NestJS, TypeScript, PostgreSQL, and Prisma. The frontend applications
-and shared packages are part of the planned project structure.
+---
 
-------------------------------------------------------------------------
+## Development Environment
 
-## Development environment
+### Prerequisites
 
-### Required software
+| Tool | Verified Version | Notes |
+|---|---|---|
+| **Node.js** | `>= 20.x` (tested on `24.x`) | LTS recommended |
+| **pnpm** | `>= 9.x` (tested on `12.x`) | Package manager for workspaces |
+| **Git** | `>= 2.40.x` | Version control |
+| **PostgreSQL** | `>= 15.x` | Hosted on Supabase or local instance |
 
-Install:
-
-- [Git](https://git-scm.com/)
-- [Node.js](https://nodejs.org/) --- use the project-tested version
-  below
-- [pnpm](https://pnpm.io/)
-- [Visual Studio Code](https://code.visualstudio.com/) or another
-  editor
-
-### Versions used for the current development setup
-
-| Tool    | Version   |
-|---------|-----------|
-| Node.js | `24.19.0` |
-| pnpm    | `12.21.0` |
-| Git     | `2.53.0`  |
-
-Check your installed versions:
-
-``` powershell
+Verify your environment:
+```powershell
 node --version
 pnpm --version
 git --version
 ```
 
-------------------------------------------------------------------------
+---
 
-## First-time setup on a new computer
+## First-Time Setup on a Fresh Machine
 
-### 1. Clone the repository
-
-``` powershell
+### 1. Clone the Repository
+```powershell
 git clone https://github.com/swayamjagtap/raah-care.git
-Set-Location raah-care
+cd raah-care
 ```
 
-### 2. Enable the project's pnpm version
-
-``` powershell
-corepack enable
-corepack prepare pnpm@12.21.0 --activate
-```
-
-Check:
-
-``` powershell
-pnpm --version
-```
-
-### 3. Install dependencies
-
-Run this from the repository root (`raah-care`):
-
-``` powershell
+### 2. Install Monorepo Dependencies
+```powershell
 pnpm install
 ```
 
-This installs the dependencies for the workspace. Keep `package.json`
-files and `pnpm-lock.yaml` committed whenever dependencies change.
+### 3. Configure Environment Files
 
-------------------------------------------------------------------------
+You must configure environment variables for the backend and the frontend portals. Tracked `.env.example` templates are provided in each directory.
 
-## Environment variables
+#### Backend Environment (`backend/.env`):
+Create `backend/.env` (copy from `backend/.env.example`):
+```env
+PORT=3000
+NODE_ENV=development
 
-The backend connects to the project's Supabase PostgreSQL database.
-Database credentials are **not stored in Git**.
+# Database connection strings (Supabase PostgreSQL)
+DATABASE_URL="postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres"
 
-### 1. Create your local environment file
+# Supabase Auth Configuration
+SUPABASE_URL="https://[PROJECT-REF].supabase.co"
+SUPABASE_ANON_KEY="eyJhbGciOi..."
+SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOi..."
+SUPABASE_JWT_SECRET="your-supabase-jwt-secret"
 
-Run from the repository root:
+# Application URLs & CORS
+FRONTEND_URL="http://localhost:5173"
+CORS_ORIGINS="http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176"
+```
+> [!IMPORTANT]
+> The backend requires both `DATABASE_URL` (connection pooler) and `DIRECT_URL` (direct connection for running Prisma migrations).
 
-``` powershell
-Copy-Item backend/.env.example backend/.env
+#### Frontend Portal Environments (`apps/*/.env`):
+Copy `.env.example` to `.env` in each app:
+- `apps/patient-web/.env`
+- `apps/ambulance-web/.env`
+- `apps/hospital-web/.env`
+- `apps/admin-web/.env`
+
+Required frontend variables:
+```env
+VITE_API_BASE_URL="http://localhost:3000/api/v1"
+VITE_WS_URL="ws://localhost:3000"
+VITE_SUPABASE_URL="https://[PROJECT-REF].supabase.co"
+VITE_SUPABASE_ANON_KEY="eyJhbGciOi..."
 ```
 
-### 2. Add your database connection strings
+---
 
-Open the new file:
+## Database Initialization
 
-``` powershell
-code backend/.env
+### 1. Generate Prisma Client
+Generate the type-safe Prisma Client into `backend/generated/prisma`:
+```powershell
+pnpm --filter backend exec prisma generate
 ```
 
-If the `code` command is unavailable, open `backend/.env` from VS Code's
-Explorer.
-
-Set both values using the connection strings from the Supabase project:
-
-``` env
-DATABASE_URL="YOUR_SUPABASE_POOLER_CONNECTION_STRING"
-DIRECT_URL="YOUR_SUPABASE_DIRECT_CONNECTION_STRING"
+### 2. Apply Database Migrations
+Deploy tracked migrations to your PostgreSQL/Supabase database:
+```powershell
+pnpm --filter backend exec prisma migrate deploy
 ```
 
-Use the exact connection details shown by Supabase for this project. If
-your database password contains reserved URL characters, URL-encode
-those characters before placing the password in the connection string.
-
-**Never commit `backend/.env` or share its contents.** The tracked
-`backend/.env.example` contains placeholders only.
-
-------------------------------------------------------------------------
-
-## Backend setup
-
-Run these commands from the repository root:
-
-``` powershell
-Set-Location backend
+### 3. (Optional) Seed Initial Data
+Seed the database with initial emergency hospitals, ambulances, and bed quotas:
+```powershell
+pnpm --filter backend seed
 ```
 
-Generate the Prisma client:
+---
 
-``` powershell
-pnpm exec prisma generate
+## Running in Development
+
+You can start the backend and frontend portals independently or concurrently.
+
+### Start the Backend API (Port 3000)
+```powershell
+pnpm dev:backend
+# Or: pnpm --filter backend start:dev
+```
+The NestJS API will be available at `http://localhost:3000/api/v1`.  
+Health check endpoint: `http://localhost:3000/api/v1/health`.
+
+### Start the Frontend Portals
+In separate terminals, run the desired portals:
+
+```powershell
+# Patient Portal (Port 5173)
+pnpm dev:patient
+
+# Ambulance / Paramedic Portal (Port 5174)
+pnpm dev:ambulance
+
+# Hospital / Doctor Portal (Port 5175)
+pnpm dev:hospital
+
+# Admin / Control Centre Portal (Port 5176)
+pnpm dev:admin
 ```
 
-Validate the Prisma schema:
+| Portal | Port | Target Audience | Primary Role Guard |
+|---|---|---|---|
+| **Patient Web** | `http://localhost:5173` | Citizens, Patients, Caregivers | `PATIENT` |
+| **Ambulance Web** | `http://localhost:5174` | EMTs, Paramedics, Drivers | `PARAMEDIC`, `AMBULANCE_DRIVER` |
+| **Hospital Web** | `http://localhost:5175` | ER Doctors, Triage Nurses, Admins | `DOCTOR`, `HOSPITAL_ADMIN` |
+| **Admin Web** | `http://localhost:5176` | Dispatchers, System Administrators | `DISPATCHER`, `SYSTEM_ADMIN` |
 
-``` powershell
-pnpm exec prisma validate
-```
+---
 
-Apply committed migrations to the configured database:
+## Verification & Automated Testing
 
-``` powershell
-pnpm exec prisma migrate deploy
-```
+The monorepo uses **Vitest** across the backend and frontend applications.
 
-`migrate deploy` applies migrations that are already present in the
-repository. Do not use migration commands that create or reset a
-database unless you specifically intend to change the database schema.
-
-------------------------------------------------------------------------
-
-## Start the backend
-
-Keep the terminal in the `backend` directory and run:
-
-``` powershell
-pnpm run start:dev
-```
-
-The API is available at:
-
-``` text
-http://localhost:3000
-```
-
-All API routes use this global prefix:
-
-``` text
-/api/v1
-```
-
-### Health check
-
-Open a second PowerShell terminal and run:
-
-``` powershell
-curl.exe http://localhost:3000/api/v1/health
-```
-
-Expected response:
-
-``` json
-{
-  "status": "ok",
-  "service": "raah-care-backend"
-}
-```
-
-------------------------------------------------------------------------
-
-## Implemented backend API
-
-The following routes are currently implemented.
-
-### Emergency cases
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/v1/emergencies` | Create an emergency case |
-| `GET` | `/api/v1/emergencies` | List emergency cases |
-| `GET` | `/api/v1/emergencies/:id` | Get an emergency case |
-| `PATCH` | `/api/v1/emergencies/:id/status` | Update case status |
-
-### Ambulances
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/v1/ambulances` | Register an ambulance |
-| `GET` | `/api/v1/ambulances` | List ambulances |
-| `GET` | `/api/v1/ambulances/:id` | Get an ambulance |
-| `PATCH` | `/api/v1/ambulances/:id/status` | Update ambulance status |
-
-### Assignments
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/v1/emergencies/:emergencyId/assignments` | Assign an ambulance to an emergency |
-| `GET` | `/api/v1/emergencies/:emergencyId/assignments` | List assignments for an emergency |
-| `GET` | `/api/v1/assignments/:id` | Get an assignment |
-| `PATCH` | `/api/v1/assignments/:id/accept` | Accept an assignment |
-| `PATCH` | `/api/v1/assignments/:id/reject` | Reject an assignment |
-| `PATCH` | `/api/v1/assignments/:id/status` | Update assignment status |
-
-### Hospitals and Resources
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/v1/hospitals` | Register a hospital |
-| `GET` | `/api/v1/hospitals` | List hospitals |
-| `GET` | `/api/v1/hospitals/:id` | Get a hospital |
-| `PATCH` | `/api/v1/hospitals/:id` | Update hospital details |
-| `POST` | `/api/v1/hospitals/:id/resources` | Create a hospital resource |
-| `GET` | `/api/v1/hospitals/:id/resources` | List hospital resources |
-| `PATCH` | `/api/v1/hospitals/:id/resources/:resourceId` | Update resource status and quantity |
-
-### Allocation & Recommendations (M5.3 Stage 2)
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/v1/emergencies/:id/ambulance-recommendations` | Score and rank candidate ambulances |
-| `GET` | `/api/v1/emergencies/:id/hospital-recommendations` | Score and rank destination hospitals |
-| `PATCH` | `/api/v1/emergencies/:id/destination` | Select/reassign hospital with safety and concurrency guards |
-
-### Patient Handover (M5.4)
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/v1/handovers` | Initiate patient handover at destination hospital |
-| `GET` | `/api/v1/handovers/:id` | Get handover record details |
-| `GET` | `/api/v1/handovers/case/:caseId/active` | Get current active handover for an emergency case |
-| `GET` | `/api/v1/handovers/case/:caseId` | List all handovers for an emergency case |
-| `PATCH` | `/api/v1/handovers/:id` | Update handover notes, vitals, or clinical summary |
-| `POST` | `/api/v1/handovers/:id/complete` | Complete handover, resolve case, and release ambulance |
-| `POST` | `/api/v1/handovers/:id/reject` | Reject handover, preserve hospital arrival, retain ambulance |
-| `POST` | `/api/v1/handovers/:id/cancel` | Cancel handover, preserve hospital arrival, retain ambulance |
-
-------------------------------------------------------------------------
-
-## Current emergency workflow
-
-The implemented backend supports the following core flow:
-
-``` text
-Emergency created
-       |
-       v
-Dispatcher assigns an ambulance (or uses M5.3 recommendations)
-       |
-       v
-Ambulance accepts the assignment
-       |
-       v
-Ambulance travels to the scene
-       |
-       v
-Ambulance arrives at the scene
-       |
-       v
-Patient is onboard
-       |
-       v
-Hospital recommendation & destination selected (M5.3)
-       |
-       v
-Ambulance en route to hospital & arrives at hospital
-       |
-       v
-Patient handover initiated, updated, & accepted (M5.4)
-       |
-       v
-Emergency case & assignment completed; ambulance released to available
-```
-
-Emergency status changes and key workflow actions are recorded as
-`CaseEvent` audit records.
-
-**Status Note:** Core emergency case management, ambulance assignments,
-hospital resource management, recommendation and destination selection APIs
-(M5.3 Stage 2), and digital patient handover APIs (M5.4) are fully implemented
-and verified at the backend service and API layer with 276 unit tests and 20
-E2E tests passing. Dedicated frontend portals (`apps/`), remote database
-migration execution, and deployment to production environments remain in progress.
-
-------------------------------------------------------------------------
-
-## Testing and verification
-
-Run these commands from the `backend` directory.
-
-### Unit tests
-
-``` powershell
+### Run All Unit & Integration Tests (438 Passing Tests)
+```powershell
 pnpm test
 ```
+This executes:
+- `backend`: 363 tests across 28 test files (services, guards, controllers, DTOs).
+- `apps/patient-web`: 52 tests across 4 test files (auth lifecycle, Cura Card, profile).
+- `apps/ambulance-web`: 10 tests across 3 test files (scanner, dashboard, role boundary).
+- `apps/hospital-web`: 8 tests across 3 test files (ER scanner, dashboard, role boundary).
+- `apps/admin-web`: 5 tests across 2 test files (role boundary, dashboard).
 
-### End-to-end tests
-
-``` powershell
-pnpm run test:e2e
+### Run Backend Tests Only
+```powershell
+pnpm test:backend
 ```
 
-### Production build
-
-``` powershell
-pnpm run build
+### Run Frontend Tests Only
+```powershell
+pnpm test:web
 ```
 
-### Lint
-
-``` powershell
-pnpm run lint
+### Verify Production Builds
+Ensure all TypeScript projects and bundlers compile cleanly:
+```powershell
+pnpm build
 ```
 
-### Prisma validation
+---
 
-``` powershell
-pnpm exec prisma validate
-```
+## Core Architecture & Security Model
 
-Before pushing a substantial backend change, run the full verification:
+### Authentication & RBAC Boundary
+1. **Supabase Auth**: Authenticates users and issues signed JWT tokens (`sub` matches Supabase user UUID).
+2. **Backend Bridge**: When a user registers or logs in, their Supabase identity is resolved against the PostgreSQL `User` record (`User.supabaseId`).
+3. **RolesGuard**: Every backend endpoint is protected by `@Roles(...)` decorators matching the `UserRole` enum (`PATIENT`, `PARAMEDIC`, `AMBULANCE_DRIVER`, `DOCTOR`, `HOSPITAL_ADMIN`, `DISPATCHER`, `SYSTEM_ADMIN`).
 
-``` powershell
-pnpm exec prisma validate
-pnpm test
-pnpm run test:e2e
-pnpm run build
-pnpm run lint
-```
+### Cura Card Emergency Identification System
+The **Cura Card** provides life-saving medical profile visibility during the Golden Hour while strictly preserving patient privacy:
+- **No Raw PII in QR Codes**: The QR code encodes only a transient resolution URL containing a 256-bit cryptographically random token (`http://localhost:5173/cura-card?token=...`). It never contains names, blood groups, or medical history.
+- **5-Minute Ephemeral Lifecycle**: Tokens automatically expire after 5 minutes.
+- **Instant Revocation**: Patients can click "Revoke QR" at any time, immediately invalidating the active token in PostgreSQL (`revokedAt = NOW()`).
+- **Cryptographic Storage**: Raw tokens are never stored in the database; only SHA-256 hashes are persisted (`CuraCardToken.tokenHash`).
+- **Role-Restricted Resolution**: Only authorized first responders (`PARAMEDIC` and `DOCTOR`) can resolve a token via `POST /api/v1/cura-card/resolve`.
+- **Immutable Audit Logging**: Every scan attempt (successful, expired, revoked, or unauthorized) is permanently recorded in `CuraCardAudit`.
+- **Offline Fallback**: If an emergency occurs in an area without connectivity, the permanent stable Card ID (e.g. `RAAH-CR-91D9FBB9`) displayed on the card can be manually referenced by responders.
 
-------------------------------------------------------------------------
+---
 
-## Database
+## Current Project Status & Verified Milestones
 
-The backend uses:
+- **M1–M3**: Monorepo architecture, database schema, NestJS backend API foundations.
+- **M4–M7**: Core emergency dispatching, allocation engine, hospital capacity tracking, bed reservation, and digital handover workflows.
+- **M8.1–M8.8**: Supabase JWT authentication, RBAC guards, user provisioning, and secure session management.
+- **M9.1–M9.3**: Patient Portal emergency workflows, real-time response tracking, and incident history.
+- **M9.4**: Authenticated Patient Medical Profile APIs (`GET /api/v1/patients/me`, `PATCH /api/v1/patients/me`) and emergency contact persistence.
+- **M9.5**: Cura Card dual-layer QR generation (Patient Web) and HTML5 camera decoding scanners (`apps/ambulance-web`, `apps/hospital-web`) with audit logging.
+- **M9.6**: Frontend route recovery, navigation stabilization, and NestJS development startup path alignment.
+- **M9.7**: Database schema alignment (`revokedAt`), live patient settings integration, and monorepo pre-deployment test pass.
 
-- **Database:** PostgreSQL
-- **Hosting:** Supabase
-- **ORM:** Prisma
-- **Backend framework:** NestJS
+---
 
-Important database files:
+## Known Operational Considerations & Continuation Path
 
-| File or directory | Purpose |
-| --- | --- |
-| `backend/prisma/schema.prisma` | Database models and relations |
-| `backend/prisma/migrations/` | Version-controlled database migrations |
-| `backend/generated/` | Generated Prisma client output |
-
-The generated Prisma client is recreated locally with
-`pnpm exec prisma generate` and should not be committed.
-
-Commit new Prisma migration files whenever you make a database schema
-change.
-
-------------------------------------------------------------------------
-
-## Switching between computers
-
-Use this checklist when moving development from your personal laptop to
-a college computer (or another machine).
-
-### On the new computer
-
-``` powershell
-git clone https://github.com/swayamjagtap/raah-care.git
-Set-Location raah-care
-
-corepack enable
-corepack prepare pnpm@12.21.0 --activate
-
-pnpm install
-```
-
-### Configure the local database environment
-
-``` powershell
-Copy-Item backend/.env.example backend/.env
-code backend/.env
-```
-
-Add the required Supabase connection strings. Do not copy the `.env`
-file into Git or send it through chat.
-
-### Prepare and run the backend
-
-``` powershell
-Set-Location backend
-
-pnpm exec prisma generate
-pnpm exec prisma migrate deploy
-
-pnpm run start:dev
-```
-
-To get the latest committed work on a computer that already has the
-repository:
-
-``` powershell
-git pull origin main
-pnpm install
-```
-
-If the Prisma schema or migrations have changed, also run:
-
-``` powershell
-pnpm exec prisma generate
-pnpm exec prisma migrate deploy
-```
-
-------------------------------------------------------------------------
-
-## Files that must not be committed
-
-Do not commit:
-
-``` text
-.env
-backend/.env
-node_modules/
-dist/
-build/
-coverage/
-backend/generated/
-```
-
-Do not put database passwords, API keys, JWT secrets, or other
-credentials in source files, documentation, screenshots, or commits.
-
-Use `backend/.env.example` to document the names of required environment
-variables without including real credentials.
-
-------------------------------------------------------------------------
-
-## Development and Git workflow
-
-Before starting work:
-
-``` powershell
-git status
-git pull origin main
-```
-
-After making changes, review them:
-
-``` powershell
-git status
-git diff
-```
-
-Run the backend verification commands before committing:
-
-``` powershell
-Set-Location backend
-pnpm exec prisma validate
-pnpm test
-pnpm run test:e2e
-pnpm run build
-pnpm run lint
-Set-Location ..
-```
-
-Stage and commit only the intended files:
-
-``` powershell
-git add <files-to-commit>
-git diff --cached --check
-git diff --cached --stat
-git commit -m "describe the change"
-git push origin main
-```
-
-Avoid using `git add .` blindly. Check `git status` first to make sure
-local environment files and generated files are not staged.
-
-------------------------------------------------------------------------
-
-## Project status
-
-- **Backend Architecture & Foundation (M1–M3):** Core emergencies, ambulances, assignments, hospitals, and hospital resource management are implemented and verified.
-- **Allocation & Recommendations (M5.3):** Ambulance and hospital recommendation APIs along with destination selection, operational safety blocks, and concurrency guards are implemented and verified (241/241 unit tests).
-- **Patient Handover (M5.4):** Complete digital handover lifecycle (initiation, active update, completion/resolution, rejection, cancellation) with transactional state guards, active-handover partial unique index, and dedicated event types is implemented and verified locally (276/276 unit tests, 20/20 E2E tests).
-- **Database Migrations:** All M5.3 schema requirements and M5.4 migrations (`20261124230000_add_active_handover_partial_unique_index`, `20261124231000_add_handover_rejected_cancelled_events`) are version-controlled locally. Remote execution against the Supabase instance is pending deployment.
-- **Portals (M4) & Shared Frontend:** Architecture documented; portal applications in `apps/` are under development.
-- **Auth & RBAC (M8):** Authentication and role-based guards remain deferred.
+1. **Camera Permissions over Network (LAN Testing)**: Modern browsers block `navigator.mediaDevices.getUserMedia` when accessed over unencrypted HTTP (except on `localhost`). When testing responder QR scanning across physical mobile devices on a local Wi-Fi network, run the development server behind an HTTPS tunnel (such as `cloudflared` or `ngrok`).
+2. **Privileged Demo Accounts**: Patient accounts can self-register via the Patient Portal. Privileged responder accounts (`PARAMEDIC`, `DOCTOR`, `DISPATCHER`) must have their roles provisioned in the database via seed scripts or administrative endpoints (`POST /api/v1/auth/users`).
+3. **Production Deployment**: The backend is prepared for containerized deployment (e.g., Railway, Render, Fly.io, or AWS ECS), and the four frontend Vite applications are ready for deployment to Vercel or Netlify.

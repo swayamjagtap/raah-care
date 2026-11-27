@@ -46,13 +46,27 @@ Emergency and assignment statuses must be validated by the backend.
 
 Portals must not independently define conflicting status vocabularies or bypass backend transition rules.
 
-### D-004 – Cura Card
+### D-004 – Cura Card Security Architecture: Ephemeral Tokens vs Static Medical Payloads
 
-**Status:** ACCEPTED – PRODUCT CONCEPT
+**Status:** ACCEPTED (Implemented in M9.5)
 
-The Cura Card is part of the RAAH product concept and is intended to support quick patient identification and access to essential emergency information.
+**Context:**
+The Cura Card requires rapid clinical identification during trauma and resuscitation. Two primary architectural designs were considered:
+1. *Static Medical Payload*: Encoding the patient's name, blood group, allergies, and emergency contact directly into a static QR code.
+2. *Cryptographic Ephemeral Token*: Encoding a transient, signed URL containing a 256-bit cryptographically random token that resolves via an authenticated backend API.
 
-Its detailed technical implementation, validation, consent and access-control rules remain to be finalised.
+**Decision:**
+RAAH-CARE strictly adopts the **Cryptographic Ephemeral Token** model:
+- The QR payload contains zero plain-text medical records, diagnoses, or patient PII.
+- Tokens are valid for exactly 5 minutes (300,000 ms) and expire automatically.
+- Patients can instantly revoke active tokens with one click (`POST /api/v1/cura-card/revoke`).
+- Token hashes (SHA-256) are stored in PostgreSQL; raw tokens are never persisted in the database.
+- Resolution (`POST /api/v1/cura-card/resolve`) is strictly restricted by RBAC to verified `PARAMEDIC` and `DOCTOR` roles.
+- Every scan attempt is logged in `CuraCardAudit` for compliance and legal accountability.
+- For emergency offline fallback, a permanent stable Card ID (e.g. `RAAH-CR-91D9FBB9`) is printed on the physical card/display for manual dispatcher radio lookup.
+
+**Reasoning:**
+Emergency patients frequently lose possession of their devices or show their screens in public spaces. Encoding raw medical PII into a static QR code creates severe privacy violations (bystanders or malicious actors scanning the code with a standard smartphone camera could permanently acquire sensitive medical histories). The ephemeral token model guarantees confidentiality while preserving sub-second triage access for authorized clinicians.
 
 ### D-005 – Allocation Module
 

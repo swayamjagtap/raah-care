@@ -143,12 +143,13 @@ enum CaseEventType {
 // ----------------------------------------------------
 
 model User {
-  id       String   @id @default(uuid())
-  email    String?  @unique
-  phone    String?  @unique
-  name     String
-  role     UserRole @default(PATIENT)
-  isActive Boolean  @default(true)
+  id         String  @id @default(uuid())
+  supabaseId String? @unique // Supabase Auth user UUID (sub claim) — set during M8 auth sync
+  email      String? @unique
+  phone      String? @unique
+  name       String
+  role       UserRole @default(PATIENT)
+  isActive   Boolean  @default(true)
 
   // Hospital association (for DOCTOR, HOSPITAL_ADMIN)
   hospitalId String?
@@ -167,6 +168,7 @@ model User {
   paramedicHandovers    Handover[]      @relation("ParamedicHandovers")
   doctorHandovers       Handover[]      @relation("DoctorHandovers")
   caseEvents            CaseEvent[]     @relation("ActorEvents")
+  curaCardAudits        CuraCardAudit[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -179,6 +181,7 @@ model User {
 
 model Patient {
   id     String  @id @default(uuid())
+  cardId String? @unique // Permanent stable Cura Card ID e.g. "RAAH-CR-XXXXXX"
   userId String? @unique
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -193,12 +196,54 @@ model Patient {
   currentMedication String?
 
   emergencyCases EmergencyCase[]
+  curaCardTokens CuraCardToken[]
+  curaCardAudits CuraCardAudit[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([phoneNumber])
   @@index([fullName])
+  @@index([cardId])
+}
+
+model CuraCardToken {
+  id        String    @id @default(uuid())
+  patientId String
+  patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique // SHA-256 hash of the 256-bit random token
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([patientId])
+  @@index([tokenHash])
+}
+
+enum CuraCardAccessOutcome {
+  SUCCESS
+  EXPIRED
+  REVOKED
+  INVALID
+  UNAUTHORIZED
+}
+
+model CuraCardAudit {
+  id            String                @id @default(uuid())
+  patientId     String?
+  patient       Patient?              @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  responderId   String?
+  responder     User?                 @relation(fields: [responderId], references: [id], onDelete: SetNull)
+  responderRole UserRole
+  outcome       CuraCardAccessOutcome
+  caseId        String?
+  metadata      Json?
+  createdAt     DateTime              @default(now())
+
+  @@index([patientId])
+  @@index([responderId])
+  @@index([outcome])
+  @@index([createdAt])
 }
 
 model EmergencyCase {

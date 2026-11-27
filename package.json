@@ -4,7 +4,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "pnpm --filter backend test && pnpm --filter \"./apps/*\" test && pnpm --filter \"./packages/*\" test",
+    "test:backend": "pnpm --filter backend test",
+    "test:web": "pnpm --filter \"./apps/*\" test",
+    "build": "pnpm --filter backend build && pnpm --filter \"./apps/*\" build",
+    "build:web": "pnpm --filter \"./apps/*\" build",
+    "lint": "pnpm --filter backend lint && pnpm --filter \"./apps/*\" lint",
+    "dev:backend": "pnpm --filter backend start:dev",
+    "dev:patient": "pnpm --filter patient-web dev",
+    "dev:ambulance": "pnpm --filter ambulance-web dev",
+    "dev:hospital": "pnpm --filter hospital-web dev",
+    "dev:admin": "pnpm --filter admin-web dev"
   },
   "keywords": [],
   "author": "",

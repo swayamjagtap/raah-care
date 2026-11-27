@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { AssignmentStatus } from '../../../generated/prisma/enums.js';
 
 export class UpdateAssignmentStatusDto {
@@ -11,8 +11,4 @@ export class UpdateAssignmentStatusDto {
   @IsOptional()
   @IsString()
   notes?: string;
-
-  @IsOptional()
-  @IsUUID()
-  actorId?: string;
 }

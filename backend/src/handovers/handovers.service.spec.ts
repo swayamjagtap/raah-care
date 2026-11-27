@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -163,7 +164,7 @@ describe('HandoversService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
-    it('validates paramedic user role and ambulance affiliation', async () => {
+    it('populates paramedicId from authenticated user and records CaseEvent', async () => {
       vi.mocked(prisma.emergencyCase.findUnique).mockResolvedValue(
         mockEmergency as any,
       );
@@ -171,73 +172,41 @@ describe('HandoversService', () => {
         mockAssignment as any,
       );
       vi.mocked(prisma.handover.findFirst).mockResolvedValue(null);
-
-      // User not found
-      vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
-      await expect(
-        service.initiateHandover({
-          caseId: 'case-1',
-          paramedicId: 'missing-user',
-        }),
-      ).rejects.toThrow(NotFoundException);
-
-      // Wrong role
-      vi.mocked(prisma.user.findUnique).mockResolvedValue({
-        id: 'u-1',
-        name: 'Patient',
-        role: UserRole.PATIENT,
+      vi.mocked(prisma.handover.create).mockResolvedValue({
+        ...mockHandover,
+        status: HandoverStatus.IN_PROGRESS,
       } as any);
-      await expect(
-        service.initiateHandover({ caseId: 'case-1', paramedicId: 'u-1' }),
-      ).rejects.toThrow(BadRequestException);
 
-      // Wrong ambulance
-      vi.mocked(prisma.user.findUnique).mockResolvedValue({
-        id: 'u-1',
-        name: 'Other Para',
+      const mockUser: any = {
+        userId: 'user-para-1',
         role: UserRole.PARAMEDIC,
-        ambulanceId: 'different-ambulance',
-      } as any);
-      await expect(
-        service.initiateHandover({ caseId: 'case-1', paramedicId: 'u-1' }),
-      ).rejects.toThrow(BadRequestException);
-    });
+        ambulanceId: 'amb-1',
+      };
 
-    it('validates receiving doctor role and hospital affiliation', async () => {
-      vi.mocked(prisma.emergencyCase.findUnique).mockResolvedValue(
-        mockEmergency as any,
-      );
-      vi.mocked(prisma.assignment.findFirst).mockResolvedValue(
-        mockAssignment as any,
-      );
-      vi.mocked(prisma.handover.findFirst).mockResolvedValue(null);
-
-      // Wrong doctor role
-      vi.mocked(prisma.user.findUnique).mockResolvedValue({
-        id: 'u-doc',
-        name: 'Nurse',
-        role: UserRole.CAREGIVER,
-      } as any);
-      await expect(
-        service.initiateHandover({
+      const result = await service.initiateHandover(
+        {
           caseId: 'case-1',
-          receivingDoctorId: 'u-doc',
-        }),
-      ).rejects.toThrow(BadRequestException);
+          clinicalSummary: 'Patient stable',
+        },
+        mockUser,
+      );
 
-      // Wrong hospital affiliation
-      vi.mocked(prisma.user.findUnique).mockResolvedValue({
-        id: 'u-doc',
-        name: 'Other Doc',
-        role: UserRole.DOCTOR,
-        hospitalId: 'different-hospital',
-      } as any);
-      await expect(
-        service.initiateHandover({
-          caseId: 'case-1',
-          receivingDoctorId: 'u-doc',
+      expect(result.status).toBe(HandoverStatus.IN_PROGRESS);
+      expect(prisma.handover.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          paramedicId: 'user-para-1',
+          receivingDoctorId: null,
         }),
-      ).rejects.toThrow(BadRequestException);
+        include: expect.any(Object),
+      });
+      expect(prisma.caseEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorId: 'user-para-1',
+            eventType: CaseEventType.HANDOVER_STARTED,
+          }),
+        }),
+      );
     });
 
     it('initiates handover successfully and transitions case to HANDOVER_IN_PROGRESS', async () => {
@@ -254,11 +223,13 @@ describe('HandoversService', () => {
         status: HandoverStatus.IN_PROGRESS,
       } as any);
 
-      const result = await service.initiateHandover({
-        caseId: 'case-1',
-        paramedicId: 'user-para-1',
-        clinicalSummary: 'Patient stable',
-      });
+      const result = await service.initiateHandover(
+        {
+          caseId: 'case-1',
+          clinicalSummary: 'Patient stable',
+        },
+        { userId: 'user-para-1', role: UserRole.PARAMEDIC, ambulanceId: 'amb-1' } as any,
+      );
 
       expect(result.status).toBe(HandoverStatus.IN_PROGRESS);
       expect(result.clinicalDisclaimer).toBeDefined();
@@ -498,6 +469,66 @@ describe('HandoversService', () => {
       });
 
       expect(result.clinicalSummary).toBe('Updated vitals recorded');
+    });
+  });
+
+  // ─── M8.5 Handover Scope Authorization ────────────────────────────────────
+
+  describe('M8.5 Handover Scope Authorization', () => {
+    const ownHospitalId = 'hospital-1';
+    const otherHospitalId = 'hospital-2';
+    const ownAmbulanceId = 'ambulance-1';
+    const otherAmbulanceId = 'ambulance-2';
+
+    const doctorUser = {
+      userId: 'doc-1',
+      supabaseId: 'sub-doc-1',
+      role: UserRole.DOCTOR,
+      hospitalId: ownHospitalId,
+      ambulanceId: null,
+    };
+
+    const paramedicUser = {
+      userId: 'para-1',
+      supabaseId: 'sub-para-1',
+      role: UserRole.PARAMEDIC,
+      hospitalId: null,
+      ambulanceId: ownAmbulanceId,
+    };
+
+    const handoverRecord = {
+      ...mockHandover,
+      hospitalId: ownHospitalId,
+      ambulanceId: ownAmbulanceId,
+    };
+
+    it('doctor accessing handover for own hospital is allowed', async () => {
+      vi.mocked(prisma.handover.findUnique).mockResolvedValue(handoverRecord as any);
+
+      const result = await service.findOne('handover-1', doctorUser);
+      expect(result.id).toBe('handover-1');
+    });
+
+    it('doctor accessing handover for another hospital throws ForbiddenException (403)', async () => {
+      vi.mocked(prisma.handover.findUnique).mockResolvedValue({
+        ...handoverRecord,
+        hospitalId: otherHospitalId,
+      } as any);
+
+      await expect(service.findOne('handover-1', doctorUser)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('paramedic accessing handover outside their ambulance context throws ForbiddenException (403)', async () => {
+      vi.mocked(prisma.handover.findUnique).mockResolvedValue({
+        ...handoverRecord,
+        ambulanceId: otherAmbulanceId,
+      } as any);
+
+      await expect(service.findOne('handover-1', paramedicUser)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 });

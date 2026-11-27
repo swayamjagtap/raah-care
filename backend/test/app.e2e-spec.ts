@@ -5,6 +5,7 @@ import { App } from 'supertest/types.js';
 import { vi, describe, beforeEach, it, afterEach } from 'vitest';
 import { AppModule } from './../src/app.module.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
+import { E2E_TEST_ADMIN_AUTH_HEADER, E2E_TEST_ADMIN_USER } from './test-auth.helper.js';
 
 describe('AppController, Emergencies, Ambulances, Assignments & Hospitals (e2e)', () => {
   let app: INestApplication<App>;
@@ -114,6 +115,8 @@ describe('AppController, Emergencies, Ambulances, Assignments & Hospitals (e2e)'
       .useValue(prismaMock)
       .compile();
 
+    prismaMock.user.findUnique.mockResolvedValue(E2E_TEST_ADMIN_USER);
+
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(
@@ -123,6 +126,16 @@ describe('AppController, Emergencies, Ambulances, Assignments & Hospitals (e2e)'
         transform: true,
       }),
     );
+    app.use((req: any, _res: any, next: () => void) => {
+      // Health endpoint is public; do not inject auth header so we verify unauthenticated access
+      if (req.url?.includes('/health')) {
+        return next();
+      }
+      if (!req.headers.authorization) {
+        req.headers.authorization = E2E_TEST_ADMIN_AUTH_HEADER;
+      }
+      next();
+    });
     await app.init();
   });
 

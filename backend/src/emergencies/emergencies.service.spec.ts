@@ -1,10 +1,15 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   CaseEventType,
   CasePriority,
   CaseStatus,
+  UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { EmergenciesService } from './emergencies.service.js';
@@ -134,6 +139,50 @@ describe('EmergenciesService', () => {
           incidentAddress: 'Mumbai',
         }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('populates initiatorId from authenticated user and ignores client-supplied initiatorId', async () => {
+      const mockCreatedCase = {
+        id: 'case-uuid-auth',
+        caseNumber: `RAAH-${new Date().getFullYear()}-000002`,
+        status: CaseStatus.CREATED,
+        priority: CasePriority.HIGH,
+        incidentLatitude: 19.076,
+        incidentLongitude: 72.8777,
+        incidentAddress: 'Bandra, Mumbai',
+        initiatorId: 'auth-user-123',
+      };
+
+      prisma.user.findUnique.mockResolvedValue({ id: 'auth-user-123', name: 'Auth User' });
+      prisma.emergencyCase.count.mockResolvedValue(1);
+      prisma.emergencyCase.findUnique.mockResolvedValue(null);
+      prisma.emergencyCase.create.mockResolvedValue(mockCreatedCase);
+      prisma.caseEvent.create.mockResolvedValue({ id: 'event-uuid-2' });
+
+      const result = await service.create(
+        {
+          initiatorId: 'spoofed-id',
+          incidentLatitude: 19.076,
+          incidentLongitude: 72.8777,
+          incidentAddress: 'Bandra, Mumbai',
+        },
+        'auth-user-123',
+      );
+
+      expect(result).toEqual(mockCreatedCase);
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'auth-user-123' },
+      });
+      expect(prisma.emergencyCase.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          initiatorId: 'auth-user-123',
+        }),
+      });
+      expect(prisma.caseEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          actorId: 'auth-user-123',
+        }),
+      });
     });
   });
 
@@ -282,6 +331,80 @@ describe('EmergenciesService', () => {
           status: CaseStatus.DISPATCHING,
         }),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ─── M8.5 Patient Ownership Authorization ─────────────────────────────────
+
+  describe('M8.5 Patient Ownership Authorization', () => {
+    const patientAUser = {
+      userId: 'user-patient-a',
+      supabaseId: 'sub-pat-a',
+      role: UserRole.PATIENT,
+      hospitalId: null,
+      ambulanceId: null,
+    };
+
+    const patientBUser = {
+      userId: 'user-patient-b',
+      supabaseId: 'sub-pat-b',
+      role: UserRole.PATIENT,
+      hospitalId: null,
+      ambulanceId: null,
+    };
+
+    const emergencyCaseInitiatedByA = {
+      id: 'case-a-1',
+      caseNumber: 'RAAH-2026-000100',
+      initiatorId: 'user-patient-a',
+      patientId: null,
+      patient: null,
+    };
+
+    const emergencyCaseForPatientAProfile = {
+      id: 'case-a-2',
+      caseNumber: 'RAAH-2026-000101',
+      initiatorId: null,
+      patientId: 'patient-profile-a',
+      patient: { userId: 'user-patient-a' },
+    };
+
+    const emergencyCaseForNeither = {
+      id: 'case-c-1',
+      caseNumber: 'RAAH-2026-000102',
+      initiatorId: 'user-other',
+      patientId: 'patient-profile-other',
+      patient: { userId: 'user-other' },
+    };
+
+    it('patient accessing own emergency via initiatorId is allowed', async () => {
+      prisma.emergencyCase.findUnique.mockResolvedValue(emergencyCaseInitiatedByA);
+
+      const result = await service.findOne('case-a-1', patientAUser);
+      expect(result.id).toBe('case-a-1');
+    });
+
+    it('patient accessing own emergency via patientProfile relation is allowed', async () => {
+      prisma.emergencyCase.findUnique.mockResolvedValue(emergencyCaseForPatientAProfile);
+
+      const result = await service.findOne('case-a-2', patientAUser);
+      expect(result.id).toBe('case-a-2');
+    });
+
+    it("patient accessing another patient's emergency throws ForbiddenException (403)", async () => {
+      prisma.emergencyCase.findUnique.mockResolvedValue(emergencyCaseInitiatedByA);
+
+      await expect(service.findOne('case-a-1', patientBUser)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('patient accessing an emergency with no valid ownership throws ForbiddenException (403)', async () => {
+      prisma.emergencyCase.findUnique.mockResolvedValue(emergencyCaseForNeither);
+
+      await expect(service.findOne('case-c-1', patientAUser)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 });

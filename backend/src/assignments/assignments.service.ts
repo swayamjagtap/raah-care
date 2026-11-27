@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,8 +9,10 @@ import {
   AssignmentStatus,
   CaseEventType,
   CaseStatus,
+  UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-request.js';
 import {
   AcceptAssignmentDto,
   CreateAssignmentDto,
@@ -98,9 +101,27 @@ const ASSIGNABLE_CASE_STATUSES: CaseStatus[] = [
 export class AssignmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private validateAmbulanceScope(user: AuthenticatedUser | undefined, assignmentAmbulanceId: string): void {
+    if (!user) return;
+    if (user.role === UserRole.SYSTEM_ADMIN || user.role === UserRole.DISPATCHER) {
+      return;
+    }
+    if (user.role === UserRole.PARAMEDIC || user.role === UserRole.AMBULANCE_DRIVER) {
+      if (!user.ambulanceId || user.ambulanceId !== assignmentAmbulanceId) {
+        throw new ForbiddenException(
+          `Insufficient permissions: crew can only operate on assignments for their own ambulance (assigned: ${user.ambulanceId ?? 'none'}, requested: ${assignmentAmbulanceId})`,
+        );
+      }
+    }
+  }
+
   // ─── Create Assignment ───────────────────────────────────────────────────
 
-  async create(emergencyId: string, dto: CreateAssignmentDto) {
+  async create(
+    emergencyId: string,
+    dto: CreateAssignmentDto,
+    user?: AuthenticatedUser,
+  ) {
     // 1. Verify emergency exists and is assignable
     const emergency = await this.prisma.emergencyCase.findUnique({
       where: { id: emergencyId },
@@ -146,17 +167,7 @@ export class AssignmentsService {
       );
     }
 
-    // 4. Verify dispatcher exists if provided
-    if (dto.dispatcherId) {
-      const dispatcher = await this.prisma.user.findUnique({
-        where: { id: dto.dispatcherId },
-      });
-      if (!dispatcher) {
-        throw new NotFoundException(
-          `Dispatcher user with ID '${dto.dispatcherId}' not found`,
-        );
-      }
-    }
+    const dispatcherId = user?.userId ?? null;
 
     // 5. Transactional creation — all-or-nothing
     return this.prisma.$transaction(async (tx) => {
@@ -192,7 +203,7 @@ export class AssignmentsService {
         data: {
           caseId: emergencyId,
           ambulanceId: dto.ambulanceId,
-          dispatcherId: dto.dispatcherId ?? null,
+          dispatcherId,
           status: AssignmentStatus.ASSIGNED,
           notes: dto.notes ?? null,
         },
@@ -222,14 +233,14 @@ export class AssignmentsService {
         data: {
           caseId: emergencyId,
           eventType: CaseEventType.AMBULANCE_ASSIGNED,
-          actorId: dto.dispatcherId ?? null,
+          actorId: dispatcherId,
           notes: dto.notes ?? null,
           payload: {
             assignmentId: assignment.id,
             ambulanceId: dto.ambulanceId,
             ambulanceCallSign: ambulance.callSign,
             ambulanceRegistration: ambulance.registrationNumber,
-            dispatcherId: dto.dispatcherId ?? null,
+            dispatcherId,
           },
         },
       });
@@ -275,7 +286,7 @@ export class AssignmentsService {
 
   // ─── Get Single Assignment ───────────────────────────────────────────────
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthenticatedUser) {
     const assignment = await this.prisma.assignment.findUnique({
       where: { id },
       include: {
@@ -312,12 +323,14 @@ export class AssignmentsService {
       throw new NotFoundException(`Assignment with ID '${id}' not found`);
     }
 
+    this.validateAmbulanceScope(user, assignment.ambulanceId);
+
     return assignment;
   }
 
   // ─── Accept Assignment ───────────────────────────────────────────────────
 
-  async accept(id: string, dto: AcceptAssignmentDto) {
+  async accept(id: string, dto: AcceptAssignmentDto, user?: AuthenticatedUser) {
     const assignment = await this.prisma.assignment.findUnique({
       where: { id },
       include: { ambulance: true },
@@ -326,6 +339,8 @@ export class AssignmentsService {
     if (!assignment) {
       throw new NotFoundException(`Assignment with ID '${id}' not found`);
     }
+
+    this.validateAmbulanceScope(user, assignment.ambulanceId);
 
     if (assignment.status !== AssignmentStatus.ASSIGNED) {
       throw new BadRequestException(
@@ -350,7 +365,7 @@ export class AssignmentsService {
         data: {
           caseId: assignment.caseId,
           eventType: CaseEventType.AMBULANCE_ACCEPTED,
-          actorId: dto.actorId ?? null,
+          actorId: user?.userId ?? null,
           notes: dto.notes ?? null,
           payload: {
             assignmentId: id,
@@ -365,7 +380,7 @@ export class AssignmentsService {
 
   // ─── Reject Assignment ───────────────────────────────────────────────────
 
-  async reject(id: string, dto: RejectAssignmentDto) {
+  async reject(id: string, dto: RejectAssignmentDto, user?: AuthenticatedUser) {
     const assignment = await this.prisma.assignment.findUnique({
       where: { id },
       include: { ambulance: true },
@@ -374,6 +389,8 @@ export class AssignmentsService {
     if (!assignment) {
       throw new NotFoundException(`Assignment with ID '${id}' not found`);
     }
+
+    this.validateAmbulanceScope(user, assignment.ambulanceId);
 
     if (assignment.status !== AssignmentStatus.ASSIGNED) {
       throw new BadRequestException(
@@ -412,7 +429,7 @@ export class AssignmentsService {
         data: {
           caseId: assignment.caseId,
           eventType: CaseEventType.AMBULANCE_REJECTED,
-          actorId: dto.actorId ?? null,
+          actorId: user?.userId ?? null,
           notes: dto.notes ?? null,
           payload: {
             assignmentId: id,
@@ -428,7 +445,7 @@ export class AssignmentsService {
 
   // ─── Generic Status Update ───────────────────────────────────────────────
 
-  async updateStatus(id: string, dto: UpdateAssignmentStatusDto) {
+  async updateStatus(id: string, dto: UpdateAssignmentStatusDto, user?: AuthenticatedUser) {
     const assignment = await this.prisma.assignment.findUnique({
       where: { id },
       include: { ambulance: true },
@@ -437,6 +454,8 @@ export class AssignmentsService {
     if (!assignment) {
       throw new NotFoundException(`Assignment with ID '${id}' not found`);
     }
+
+    this.validateAmbulanceScope(user, assignment.ambulanceId);
 
     if (assignment.status === dto.status) {
       return assignment;
@@ -496,7 +515,7 @@ export class AssignmentsService {
           data: {
             caseId: assignment.caseId,
             eventType,
-            actorId: dto.actorId ?? null,
+            actorId: user?.userId ?? null,
             notes: dto.notes ?? null,
             payload: {
               assignmentId: id,

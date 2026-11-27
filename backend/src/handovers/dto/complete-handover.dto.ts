@@ -1,11 +1,7 @@
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CompleteHandoverDto {
-  @IsOptional()
-  @IsUUID()
-  receivingDoctorId?: string;
-
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,

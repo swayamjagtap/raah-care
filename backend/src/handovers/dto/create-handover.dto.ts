@@ -16,14 +16,6 @@ export class CreateHandoverDto {
   caseId!: string;
 
   @IsOptional()
-  @IsUUID()
-  paramedicId?: string;
-
-  @IsOptional()
-  @IsUUID()
-  receivingDoctorId?: string;
-
-  @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,
   )

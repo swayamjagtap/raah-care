@@ -24,6 +24,7 @@ import { App } from 'supertest/types.js';
 import { describe, beforeAll, afterAll, it, expect } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
+import { createTestJwt } from './test-auth.helper.js';
 import {
   AmbulanceStatus,
   AssignmentStatus,
@@ -51,9 +52,9 @@ describe('M6.2 — Stateful Database-Backed Emergency Lifecycle (Real PostgreSQL
   // Seeded fixture entities
   let seededHospital: { id: string; name: string };
   let seededAmbulance: { id: string; callSign: string };
-  let seededDispatcher: { id: string };
-  let seededParamedic: { id: string };
-  let seededDoctor: { id: string };
+  let _seededDispatcher: { id: string };
+  let _seededParamedic: { id: string };
+  let _seededDoctor: { id: string };
   let seededPatient: { id: string };
 
   // Stateful runtime variables across steps
@@ -81,6 +82,8 @@ describe('M6.2 — Stateful Database-Backed Emergency Lifecycle (Real PostgreSQL
       'prisma/migrations/20261118025500_add_hospital_resource_version_and_quantity_check/migration.sql',
       'prisma/migrations/20261124230000_add_active_handover_partial_unique_index/migration.sql',
       'prisma/migrations/20261124231000_add_handover_rejected_cancelled_events/migration.sql',
+      'prisma/migrations/20261126000000_add_supabase_id_to_user/migration.sql',
+      'prisma/migrations/20261127000000_add_cura_card/migration.sql',
     ];
 
     for (const relPath of migrationFiles) {
@@ -113,6 +116,17 @@ describe('M6.2 — Stateful Database-Backed Emergency Lifecycle (Real PostgreSQL
         transform: true,
       }),
     );
+    const dbTestToken = createTestJwt('e2e-db-dispatcher-sub');
+    app.use((req: any, _res: any, next: () => void) => {
+      if (req.headers['x-anonymous'] === 'true') {
+        delete req.headers['x-anonymous'];
+        return next();
+      }
+      if (!req.headers.authorization) {
+        req.headers.authorization = `Bearer ${dbTestToken}`;
+      }
+      next();
+    });
     await app.init();
 
     prisma = app.get(PrismaService);
@@ -156,29 +170,32 @@ describe('M6.2 — Stateful Database-Backed Emergency Lifecycle (Real PostgreSQL
       },
     });
 
-    seededDispatcher = await prisma.user.create({
+    _seededDispatcher = await prisma.user.create({
       data: {
         name: 'Dispatcher Dan',
         email: 'dan-dispatcher@raah.care',
         role: UserRole.DISPATCHER,
+        supabaseId: 'e2e-db-dispatcher-sub',
       },
     });
 
-    seededParamedic = await prisma.user.create({
+    _seededParamedic = await prisma.user.create({
       data: {
         name: 'Paramedic Priya',
         email: 'priya-paramedic@raah.care',
         role: UserRole.PARAMEDIC,
         ambulanceId: seededAmbulance.id,
+        supabaseId: 'e2e-db-paramedic-sub',
       },
     });
 
-    seededDoctor = await prisma.user.create({
+    _seededDoctor = await prisma.user.create({
       data: {
         name: 'Dr. Nair',
         email: 'nair-doctor@hospital.org',
         role: UserRole.DOCTOR,
         hospitalId: seededHospital.id,
+        supabaseId: 'e2e-db-doctor-sub',
       },
     });
 
@@ -265,7 +282,6 @@ describe('M6.2 — Stateful Database-Backed Emergency Lifecycle (Real PostgreSQL
       .post(`/api/v1/emergencies/${emergencyCaseId}/assignments`)
       .send({
         ambulanceId: seededAmbulance.id,
-        dispatcherId: seededDispatcher.id,
         notes: 'Priority dispatch for ALS unit',
       })
       .expect(201);
@@ -305,6 +321,7 @@ describe('M6.2 — Stateful Database-Backed Emergency Lifecycle (Real PostgreSQL
   it('Step 4 — PATCH /assignments/:id/accept updates assignment status to ACCEPTED', async () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/v1/assignments/${assignmentId}/accept`)
+      .set('Authorization', `Bearer ${createTestJwt('e2e-db-paramedic-sub')}`)
       .send({ notes: 'Dispatched and responding' })
       .expect(200);
 
@@ -468,10 +485,9 @@ describe('M6.2 — Stateful Database-Backed Emergency Lifecycle (Real PostgreSQL
   it('Step 12 — POST /handovers creates handover record and updates case to HANDOVER_IN_PROGRESS', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/handovers')
+      .set('Authorization', `Bearer ${createTestJwt('e2e-db-paramedic-sub')}`)
       .send({
         caseId: emergencyCaseId,
-        paramedicId: seededParamedic.id,
-        receivingDoctorId: seededDoctor.id,
         clinicalSummary: 'Patient stable, pain managed with nitro and aspirin',
         patientCondition: 'Alert, vitals stable',
         vitals: {
@@ -512,6 +528,7 @@ describe('M6.2 — Stateful Database-Backed Emergency Lifecycle (Real PostgreSQL
   it('Step 13 — POST /handovers/:id/complete resolves case, completes assignment, and releases ambulance', async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/v1/handovers/${handoverId}/complete`)
+      .set('Authorization', `Bearer ${createTestJwt('e2e-db-doctor-sub')}`)
       .send({ notes: 'Clinical care transfer completed. Patient in Bay 3.' })
       .expect(200);
 

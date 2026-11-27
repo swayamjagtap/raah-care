@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { HospitalStatus } from '../../generated/prisma/enums.js';
+import { HospitalStatus, UserRole } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-request.js';
 import {
   CreateHospitalDto,
   CreateHospitalResourceDto,
@@ -24,6 +26,20 @@ function isEmptyPayload(dto: object): boolean {
 @Injectable()
 export class HospitalsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private validateHospitalScope(user: AuthenticatedUser | undefined, targetHospitalId: string): void {
+    if (!user) return;
+    if (user.role === UserRole.SYSTEM_ADMIN || user.role === UserRole.DISPATCHER) {
+      return;
+    }
+    if (user.role === UserRole.DOCTOR || user.role === UserRole.HOSPITAL_ADMIN) {
+      if (!user.hospitalId || user.hospitalId !== targetHospitalId) {
+        throw new ForbiddenException(
+          `Insufficient permissions: user is not affiliated with hospital '${targetHospitalId}'`,
+        );
+      }
+    }
+  }
 
   async create(dto: CreateHospitalDto) {
     const existing = await this.prisma.hospital.findUnique({
@@ -65,14 +81,22 @@ export class HospitalsService {
     }
   }
 
-  async findAll(query: QueryHospitalsDto) {
+  async findAll(query: QueryHospitalsDto, user?: AuthenticatedUser) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
 
     const where: {
+      id?: string;
       status?: HospitalStatus;
     } = {};
+
+    if (user?.role === UserRole.DOCTOR || user?.role === UserRole.HOSPITAL_ADMIN) {
+      if (!user.hospitalId) {
+        throw new ForbiddenException('User is not affiliated with any hospital');
+      }
+      where.id = user.hospitalId;
+    }
 
     if (query.status !== undefined) {
       where.status = query.status;
@@ -99,7 +123,9 @@ export class HospitalsService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthenticatedUser) {
+    this.validateHospitalScope(user, id);
+
     const hospital = await this.prisma.hospital.findUnique({
       where: { id },
       include: {
@@ -116,7 +142,9 @@ export class HospitalsService {
     return hospital;
   }
 
-  async update(id: string, dto: UpdateHospitalDto) {
+  async update(id: string, dto: UpdateHospitalDto, user?: AuthenticatedUser) {
+    this.validateHospitalScope(user, id);
+
     if (isEmptyPayload(dto)) {
       throw new BadRequestException('Update payload cannot be empty');
     }
@@ -170,7 +198,9 @@ export class HospitalsService {
     }
   }
 
-  async createResource(hospitalId: string, dto: CreateHospitalResourceDto) {
+  async createResource(hospitalId: string, dto: CreateHospitalResourceDto, user?: AuthenticatedUser) {
+    this.validateHospitalScope(user, hospitalId);
+
     const hospital = await this.prisma.hospital.findUnique({
       where: { id: hospitalId },
     });
@@ -229,7 +259,9 @@ export class HospitalsService {
     }
   }
 
-  async findResources(hospitalId: string) {
+  async findResources(hospitalId: string, user?: AuthenticatedUser) {
+    this.validateHospitalScope(user, hospitalId);
+
     const hospital = await this.prisma.hospital.findUnique({
       where: { id: hospitalId },
     });
@@ -247,7 +279,10 @@ export class HospitalsService {
     hospitalId: string,
     resourceId: string,
     dto: UpdateHospitalResourceDto,
+    user?: AuthenticatedUser,
   ) {
+    this.validateHospitalScope(user, hospitalId);
+
     if (isEmptyPayload(dto)) {
       throw new BadRequestException('Update payload cannot be empty');
     }

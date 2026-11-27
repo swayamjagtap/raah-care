@@ -78,7 +78,7 @@ describe('HospitalsController', () => {
 
     const result = await controller.findAll(query);
     expect(result).toBe(expected);
-    expect(service.findAll).toHaveBeenCalledWith(query);
+    expect(service.findAll).toHaveBeenCalledWith(query, undefined);
   });
 
   it('delegates findOne to service', async () => {
@@ -87,7 +87,7 @@ describe('HospitalsController', () => {
 
     const result = await controller.findOne('hosp-uuid-1');
     expect(result).toBe(expected);
-    expect(service.findOne).toHaveBeenCalledWith('hosp-uuid-1');
+    expect(service.findOne).toHaveBeenCalledWith('hosp-uuid-1', undefined);
   });
 
   it('delegates update to service', async () => {
@@ -97,7 +97,7 @@ describe('HospitalsController', () => {
 
     const result = await controller.update('hosp-uuid-1', dto);
     expect(result).toBe(expected);
-    expect(service.update).toHaveBeenCalledWith('hosp-uuid-1', dto);
+    expect(service.update).toHaveBeenCalledWith('hosp-uuid-1', dto, undefined);
   });
 
   it('delegates createResource to service', async () => {
@@ -112,7 +112,7 @@ describe('HospitalsController', () => {
 
     const result = await controller.createResource('hosp-uuid-1', dto);
     expect(result).toBe(expected);
-    expect(service.createResource).toHaveBeenCalledWith('hosp-uuid-1', dto);
+    expect(service.createResource).toHaveBeenCalledWith('hosp-uuid-1', dto, undefined);
   });
 
   it('delegates findResources to service', async () => {
@@ -121,7 +121,7 @@ describe('HospitalsController', () => {
 
     const result = await controller.findResources('hosp-uuid-1');
     expect(result).toBe(expected);
-    expect(service.findResources).toHaveBeenCalledWith('hosp-uuid-1');
+    expect(service.findResources).toHaveBeenCalledWith('hosp-uuid-1', undefined);
   });
 
   it('delegates updateResource to service', async () => {
@@ -139,6 +139,7 @@ describe('HospitalsController', () => {
       'hosp-uuid-1',
       'res-uuid-1',
       dto,
+      undefined,
     );
   });
 });

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import {
   UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-request.js';
 import {
   CancelHandoverDto,
   CompleteHandoverDto,
@@ -27,11 +29,42 @@ import {
 
 @Injectable()
 export class HandoversService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
+
+  private validateHandoverScope(
+    user: AuthenticatedUser | undefined,
+    handover: { hospitalId: string; ambulanceId: string },
+    action: string = 'access',
+  ): void {
+    if (!user) return;
+    if (user.role === UserRole.SYSTEM_ADMIN || user.role === UserRole.DISPATCHER) {
+      return;
+    }
+    if (
+      user.role === UserRole.PARAMEDIC ||
+      user.role === UserRole.AMBULANCE_DRIVER
+    ) {
+      if (!user.ambulanceId || user.ambulanceId !== handover.ambulanceId) {
+        throw new ForbiddenException(
+          `Insufficient permissions: crew can only ${action} handovers for their own ambulance`,
+        );
+      }
+    }
+    if (
+      user.role === UserRole.DOCTOR ||
+      user.role === UserRole.HOSPITAL_ADMIN
+    ) {
+      if (!user.hospitalId || user.hospitalId !== handover.hospitalId) {
+        throw new ForbiddenException(
+          `Insufficient permissions: hospital staff can only ${action} handovers for their own hospital`,
+        );
+      }
+    }
+  }
 
   // ─── Initiate Handover ──────────────────────────────────────────────────────
 
-  async initiateHandover(dto: CreateHandoverDto) {
+  async initiateHandover(dto: CreateHandoverDto, user?: AuthenticatedUser) {
     // 1. Verify emergency case exists
     const emergency = await this.prisma.emergencyCase.findUnique({
       where: { id: dto.caseId },
@@ -50,14 +83,14 @@ export class HandoversService {
     if (emergency.status === CaseStatus.EN_ROUTE_TO_HOSPITAL) {
       throw new BadRequestException(
         `Emergency case '${emergency.caseNumber}' must be in status 'ARRIVED_AT_HOSPITAL' to initiate handover. ` +
-          `Current status is 'EN_ROUTE_TO_HOSPITAL'. Physical arrival must be recorded before starting handover.`,
+        `Current status is 'EN_ROUTE_TO_HOSPITAL'. Physical arrival must be recorded before starting handover.`,
       );
     }
 
     if (emergency.status !== CaseStatus.ARRIVED_AT_HOSPITAL) {
       throw new BadRequestException(
         `Emergency case '${emergency.caseNumber}' cannot initiate handover in status '${emergency.status}'. ` +
-          `Required status: 'ARRIVED_AT_HOSPITAL'.`,
+        `Required status: 'ARRIVED_AT_HOSPITAL'.`,
       );
     }
 
@@ -65,7 +98,7 @@ export class HandoversService {
     if (!emergency.destinationHospitalId) {
       throw new BadRequestException(
         `Emergency case '${emergency.caseNumber}' does not have a destination hospital assigned. ` +
-          `A destination hospital must be selected before initiating handover.`,
+        `A destination hospital must be selected before initiating handover.`,
       );
     }
 
@@ -81,8 +114,20 @@ export class HandoversService {
     if (!activeAssignment) {
       throw new BadRequestException(
         `Emergency case '${emergency.caseNumber}' does not have an active ambulance assignment ` +
-          `with status 'PATIENT_ONBOARD'. Cannot initiate handover without an active patient transport.`,
+        `with status 'PATIENT_ONBOARD'. Cannot initiate handover without an active patient transport.`,
       );
+    }
+
+    if (
+      user &&
+      (user.role === UserRole.PARAMEDIC ||
+        user.role === UserRole.AMBULANCE_DRIVER)
+    ) {
+      if (!user.ambulanceId || user.ambulanceId !== activeAssignment.ambulanceId) {
+        throw new ForbiddenException(
+          'Insufficient permissions: crew can only initiate handover for their own ambulance',
+        );
+      }
     }
 
     // 5. Active handover check: only one PENDING or IN_PROGRESS handover permitted per case
@@ -96,67 +141,12 @@ export class HandoversService {
     if (existingActiveHandover) {
       throw new ConflictException(
         `An active handover already exists for emergency case '${emergency.caseNumber}' ` +
-          `(Handover ID: '${existingActiveHandover.id}', Status: '${existingActiveHandover.status}').`,
+        `(Handover ID: '${existingActiveHandover.id}', Status: '${existingActiveHandover.status}').`,
       );
     }
 
-    // 6. Validate paramedic identity if provided
-    if (dto.paramedicId) {
-      const paramedic = await this.prisma.user.findUnique({
-        where: { id: dto.paramedicId },
-      });
-      if (!paramedic) {
-        throw new NotFoundException(
-          `Paramedic user with ID '${dto.paramedicId}' not found`,
-        );
-      }
-      if (
-        paramedic.role !== UserRole.PARAMEDIC &&
-        paramedic.role !== UserRole.AMBULANCE_DRIVER
-      ) {
-        throw new BadRequestException(
-          `User '${paramedic.name}' has role '${paramedic.role}', expected 'PARAMEDIC' or 'AMBULANCE_DRIVER'.`,
-        );
-      }
-      if (
-        paramedic.ambulanceId &&
-        paramedic.ambulanceId !== activeAssignment.ambulanceId
-      ) {
-        throw new BadRequestException(
-          `Paramedic '${paramedic.name}' is associated with ambulance '${paramedic.ambulanceId}', ` +
-            `which does not match the active transport ambulance '${activeAssignment.ambulanceId}'.`,
-        );
-      }
-    }
-
-    // 7. Validate receiving staff identity if provided
-    if (dto.receivingDoctorId) {
-      const doctor = await this.prisma.user.findUnique({
-        where: { id: dto.receivingDoctorId },
-      });
-      if (!doctor) {
-        throw new NotFoundException(
-          `Receiving staff user with ID '${dto.receivingDoctorId}' not found`,
-        );
-      }
-      if (
-        doctor.role !== UserRole.DOCTOR &&
-        doctor.role !== UserRole.HOSPITAL_ADMIN
-      ) {
-        throw new BadRequestException(
-          `User '${doctor.name}' has role '${doctor.role}', expected 'DOCTOR' or 'HOSPITAL_ADMIN'.`,
-        );
-      }
-      if (
-        doctor.hospitalId &&
-        doctor.hospitalId !== emergency.destinationHospitalId
-      ) {
-        throw new BadRequestException(
-          `Staff member '${doctor.name}' is affiliated with hospital '${doctor.hospitalId}', ` +
-            `which does not match destination hospital '${emergency.destinationHospitalId}'.`,
-        );
-      }
-    }
+    // 6. Automatically populate paramedic identity from authenticated user
+    const paramedicId = user?.userId ?? null;
 
     // 8. Transactional creation: Handover + EmergencyCase transition + CaseEvent
     try {
@@ -166,8 +156,8 @@ export class HandoversService {
             caseId: emergency.id,
             ambulanceId: activeAssignment.ambulanceId,
             hospitalId: emergency.destinationHospitalId!,
-            paramedicId: dto.paramedicId ?? null,
-            receivingDoctorId: dto.receivingDoctorId ?? null,
+            paramedicId,
+            receivingDoctorId: null,
             status: HandoverStatus.IN_PROGRESS,
             clinicalSummary: dto.clinicalSummary ?? null,
             patientCondition: dto.patientCondition ?? null,
@@ -227,15 +217,15 @@ export class HandoversService {
           data: {
             caseId: emergency.id,
             eventType: CaseEventType.HANDOVER_STARTED,
-            actorId: dto.paramedicId ?? null,
+            actorId: paramedicId,
             notes:
               dto.notes ?? 'Patient handover initiated at destination hospital',
             payload: {
               handoverId: handover.id,
               hospitalId: emergency.destinationHospitalId,
               ambulanceId: activeAssignment.ambulanceId,
-              paramedicId: dto.paramedicId ?? null,
-              receivingDoctorId: dto.receivingDoctorId ?? null,
+              paramedicId,
+              receivingDoctorId: null,
             },
           },
         });
@@ -265,7 +255,7 @@ export class HandoversService {
 
   // ─── Find Handover By ID ───────────────────────────────────────────────────
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthenticatedUser) {
     const handover = await this.prisma.handover.findUnique({
       where: { id },
       include: {
@@ -319,6 +309,8 @@ export class HandoversService {
       throw new NotFoundException(`Handover with ID '${id}' not found`);
     }
 
+    this.validateHandoverScope(user, handover, 'view');
+
     return {
       ...handover,
       clinicalDisclaimer: HANDOVER_CLINICAL_DISCLAIMER,
@@ -328,7 +320,7 @@ export class HandoversService {
 
   // ─── Find Active Handover for Case ─────────────────────────────────────────
 
-  async findActiveByCaseId(caseId: string) {
+  async findActiveByCaseId(caseId: string, user?: AuthenticatedUser) {
     const handover = await this.prisma.handover.findFirst({
       where: {
         caseId,
@@ -356,6 +348,8 @@ export class HandoversService {
       return null;
     }
 
+    this.validateHandoverScope(user, handover, 'view');
+
     return {
       ...handover,
       clinicalDisclaimer: HANDOVER_CLINICAL_DISCLAIMER,
@@ -365,7 +359,7 @@ export class HandoversService {
 
   // ─── Find All Handovers for Case ───────────────────────────────────────────
 
-  async findAllForCase(caseId: string) {
+  async findAllForCase(caseId: string, user?: AuthenticatedUser) {
     const emergency = await this.prisma.emergencyCase.findUnique({
       where: { id: caseId },
     });
@@ -375,8 +369,27 @@ export class HandoversService {
       );
     }
 
+    const where: any = { caseId };
+    if (user) {
+      if (
+        user.role === UserRole.PARAMEDIC ||
+        user.role === UserRole.AMBULANCE_DRIVER
+      ) {
+        if (user.ambulanceId) {
+          where.ambulanceId = user.ambulanceId;
+        }
+      } else if (
+        user.role === UserRole.DOCTOR ||
+        user.role === UserRole.HOSPITAL_ADMIN
+      ) {
+        if (user.hospitalId) {
+          where.hospitalId = user.hospitalId;
+        }
+      }
+    }
+
     const items = await this.prisma.handover.findMany({
-      where: { caseId },
+      where,
       orderBy: { createdAt: 'desc' },
       include: {
         hospital: { select: { id: true, name: true, code: true } },
@@ -397,7 +410,7 @@ export class HandoversService {
 
   // ─── Update Handover Details / Vitals ─────────────────────────────────────
 
-  async updateHandover(id: string, dto: UpdateHandoverDto) {
+  async updateHandover(id: string, dto: UpdateHandoverDto, user?: AuthenticatedUser) {
     const handover = await this.prisma.handover.findUnique({
       where: { id },
     });
@@ -405,6 +418,8 @@ export class HandoversService {
     if (!handover) {
       throw new NotFoundException(`Handover with ID '${id}' not found`);
     }
+
+    this.validateHandoverScope(user, handover, 'update');
 
     if (
       handover.status === HandoverStatus.COMPLETED ||
@@ -416,44 +431,6 @@ export class HandoversService {
       );
     }
 
-    if (dto.paramedicId) {
-      const paramedic = await this.prisma.user.findUnique({
-        where: { id: dto.paramedicId },
-      });
-      if (!paramedic) {
-        throw new NotFoundException(
-          `Paramedic user with ID '${dto.paramedicId}' not found`,
-        );
-      }
-      if (
-        paramedic.role !== UserRole.PARAMEDIC &&
-        paramedic.role !== UserRole.AMBULANCE_DRIVER
-      ) {
-        throw new BadRequestException(
-          `User '${paramedic.name}' has role '${paramedic.role}', expected 'PARAMEDIC' or 'AMBULANCE_DRIVER'.`,
-        );
-      }
-    }
-
-    if (dto.receivingDoctorId) {
-      const doctor = await this.prisma.user.findUnique({
-        where: { id: dto.receivingDoctorId },
-      });
-      if (!doctor) {
-        throw new NotFoundException(
-          `Receiving staff user with ID '${dto.receivingDoctorId}' not found`,
-        );
-      }
-      if (
-        doctor.role !== UserRole.DOCTOR &&
-        doctor.role !== UserRole.HOSPITAL_ADMIN
-      ) {
-        throw new BadRequestException(
-          `User '${doctor.name}' has role '${doctor.role}', expected 'DOCTOR' or 'HOSPITAL_ADMIN'.`,
-        );
-      }
-    }
-
     const updated = await this.prisma.handover.update({
       where: { id },
       data: {
@@ -461,8 +438,6 @@ export class HandoversService {
         patientCondition: dto.patientCondition ?? undefined,
         vitals: (dto.vitals as object) ?? undefined,
         notes: dto.notes ?? undefined,
-        paramedicId: dto.paramedicId ?? undefined,
-        receivingDoctorId: dto.receivingDoctorId ?? undefined,
       },
       include: {
         case: { select: { id: true, caseNumber: true, status: true } },
@@ -482,9 +457,9 @@ export class HandoversService {
     };
   }
 
-  // ─── Complete Handover ─────────────────────────────────────────────────────
+  // ─── Complete Handover ── ───────────────────────────────────────────────────
 
-  async completeHandover(id: string, dto: CompleteHandoverDto) {
+  async completeHandover(id: string, dto: CompleteHandoverDto, user?: AuthenticatedUser) {
     const handover = await this.prisma.handover.findUnique({
       where: { id },
       include: {
@@ -497,39 +472,18 @@ export class HandoversService {
       throw new NotFoundException(`Handover with ID '${id}' not found`);
     }
 
+    this.validateHandoverScope(user, handover, 'complete');
+
     // Must be in IN_PROGRESS status
     if (handover.status !== HandoverStatus.IN_PROGRESS) {
       throw new BadRequestException(
         `Handover can only be completed when in 'IN_PROGRESS' status. ` +
-          `Current status: '${handover.status}'.`,
+        `Current status: '${handover.status}'.`,
       );
     }
 
-    // Validate receiving doctor if provided
-    if (dto.receivingDoctorId) {
-      const doctor = await this.prisma.user.findUnique({
-        where: { id: dto.receivingDoctorId },
-      });
-      if (!doctor) {
-        throw new NotFoundException(
-          `Receiving staff user with ID '${dto.receivingDoctorId}' not found`,
-        );
-      }
-      if (
-        doctor.role !== UserRole.DOCTOR &&
-        doctor.role !== UserRole.HOSPITAL_ADMIN
-      ) {
-        throw new BadRequestException(
-          `User '${doctor.name}' has role '${doctor.role}', expected 'DOCTOR' or 'HOSPITAL_ADMIN'.`,
-        );
-      }
-      if (doctor.hospitalId && doctor.hospitalId !== handover.hospitalId) {
-        throw new BadRequestException(
-          `Staff member '${doctor.name}' is affiliated with hospital '${doctor.hospitalId}', ` +
-            `not the handover destination hospital '${handover.hospitalId}'.`,
-        );
-      }
-    }
+    // Validate receiving doctor from authenticated user if doctor/hospital_admin
+    const receivingDoctorId = user?.userId ?? handover.receivingDoctorId ?? null;
 
     // Find active assignment
     const activeAssignment = await this.prisma.assignment.findFirst({
@@ -555,8 +509,7 @@ export class HandoversService {
         data: {
           status: HandoverStatus.COMPLETED,
           handoverCompletedAt: now,
-          receivingDoctorId:
-            dto.receivingDoctorId ?? handover.receivingDoctorId,
+          receivingDoctorId,
           clinicalSummary: dto.clinicalSummary ?? handover.clinicalSummary,
           patientCondition: dto.patientCondition ?? handover.patientCondition,
           notes: dto.notes ?? handover.notes,
@@ -604,7 +557,7 @@ export class HandoversService {
         data: {
           caseId: handover.caseId,
           eventType: CaseEventType.HANDOVER_COMPLETED,
-          actorId: dto.receivingDoctorId ?? handover.receivingDoctorId ?? null,
+          actorId: receivingDoctorId,
           notes:
             dto.notes ??
             'Patient handover successfully completed and accepted by hospital staff',
@@ -612,8 +565,7 @@ export class HandoversService {
             handoverId: id,
             hospitalId: handover.hospitalId,
             ambulanceId: handover.ambulanceId,
-            receivingDoctorId:
-              dto.receivingDoctorId ?? handover.receivingDoctorId ?? null,
+            receivingDoctorId,
           },
         },
       });
@@ -623,7 +575,7 @@ export class HandoversService {
         data: {
           caseId: handover.caseId,
           eventType: CaseEventType.CASE_COMPLETED,
-          actorId: dto.receivingDoctorId ?? handover.receivingDoctorId ?? null,
+          actorId: receivingDoctorId,
           notes: 'Emergency case resolved upon successful patient handover',
           payload: {
             handoverId: id,
@@ -644,7 +596,7 @@ export class HandoversService {
 
   // ─── Reject Handover ───────────────────────────────────────────────────────
 
-  async rejectHandover(id: string, dto: RejectHandoverDto) {
+  async rejectHandover(id: string, dto: RejectHandoverDto, user?: AuthenticatedUser) {
     const handover = await this.prisma.handover.findUnique({
       where: { id },
     });
@@ -652,6 +604,8 @@ export class HandoversService {
     if (!handover) {
       throw new NotFoundException(`Handover with ID '${id}' not found`);
     }
+
+    this.validateHandoverScope(user, handover, 'reject');
 
     if (
       handover.status !== HandoverStatus.IN_PROGRESS &&
@@ -662,24 +616,7 @@ export class HandoversService {
       );
     }
 
-    if (dto.rejectingStaffId) {
-      const staff = await this.prisma.user.findUnique({
-        where: { id: dto.rejectingStaffId },
-      });
-      if (!staff) {
-        throw new NotFoundException(
-          `Staff member with ID '${dto.rejectingStaffId}' not found`,
-        );
-      }
-      if (
-        staff.role !== UserRole.DOCTOR &&
-        staff.role !== UserRole.HOSPITAL_ADMIN
-      ) {
-        throw new BadRequestException(
-          `User '${staff.name}' has role '${staff.role}', expected 'DOCTOR' or 'HOSPITAL_ADMIN'.`,
-        );
-      }
-    }
+    const rejectingStaffId = user?.userId ?? null;
 
     const notesCombined = [
       handover.notes,
@@ -719,7 +656,7 @@ export class HandoversService {
         data: {
           caseId: handover.caseId,
           eventType: CaseEventType.HANDOVER_REJECTED,
-          actorId: dto.rejectingStaffId ?? null,
+          actorId: rejectingStaffId,
           notes: `Handover rejected by hospital: ${dto.reason}`,
           payload: {
             handoverId: id,
@@ -742,7 +679,7 @@ export class HandoversService {
 
   // ─── Cancel Handover ───────────────────────────────────────────────────────
 
-  async cancelHandover(id: string, dto: CancelHandoverDto) {
+  async cancelHandover(id: string, dto: CancelHandoverDto, user?: AuthenticatedUser) {
     const handover = await this.prisma.handover.findUnique({
       where: { id },
     });
@@ -750,6 +687,8 @@ export class HandoversService {
     if (!handover) {
       throw new NotFoundException(`Handover with ID '${id}' not found`);
     }
+
+    this.validateHandoverScope(user, handover, 'cancel');
 
     if (
       handover.status !== HandoverStatus.IN_PROGRESS &&
@@ -796,7 +735,7 @@ export class HandoversService {
         data: {
           caseId: handover.caseId,
           eventType: CaseEventType.HANDOVER_CANCELLED,
-          actorId: dto.actorId ?? null,
+          actorId: user?.userId ?? null,
           notes: `Handover cancelled: ${dto.reason}`,
           payload: {
             handoverId: id,

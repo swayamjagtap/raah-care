@@ -34,7 +34,7 @@ describe('EmergenciesController', () => {
     controller = module.get<EmergenciesController>(EmergenciesController);
   });
 
-  it('delegates create to service', async () => {
+  it('delegates create to service (anonymous SOS)', async () => {
     const dto = {
       incidentLatitude: 19.076,
       incidentLongitude: 72.8777,
@@ -46,7 +46,23 @@ describe('EmergenciesController', () => {
 
     const result = await controller.create(dto);
     expect(result).toBe(expected);
-    expect(service.create).toHaveBeenCalledWith(dto);
+    expect(service.create).toHaveBeenCalledWith(dto, null);
+  });
+
+  it('delegates create to service with authenticated user ID', async () => {
+    const dto = {
+      incidentLatitude: 19.076,
+      incidentLongitude: 72.8777,
+      incidentAddress: 'Marine Drive, Mumbai',
+      priority: CasePriority.HIGH,
+    };
+    const mockUser: any = { userId: 'user-123', role: 'PATIENT' };
+    const expected = { id: 'uuid-1', ...dto, initiatorId: 'user-123' };
+    service.create.mockResolvedValue(expected);
+
+    const result = await controller.create(dto, mockUser);
+    expect(result).toBe(expected);
+    expect(service.create).toHaveBeenCalledWith(dto, 'user-123');
   });
 
   it('delegates findAll to service', async () => {
@@ -65,7 +81,7 @@ describe('EmergenciesController', () => {
 
     const result = await controller.findOne('uuid-1');
     expect(result).toBe(expected);
-    expect(service.findOne).toHaveBeenCalledWith('uuid-1');
+    expect(service.findOne).toHaveBeenCalledWith('uuid-1', undefined);
   });
 
   it('delegates updateStatus to service', async () => {
@@ -75,6 +91,6 @@ describe('EmergenciesController', () => {
 
     const result = await controller.updateStatus('uuid-1', dto);
     expect(result).toBe(expected);
-    expect(service.updateStatus).toHaveBeenCalledWith('uuid-1', dto);
+    expect(service.updateStatus).toHaveBeenCalledWith('uuid-1', dto, undefined);
   });
 });

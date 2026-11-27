@@ -30,7 +30,7 @@ describe('HandoversController', () => {
   it('delegates create to initiateHandover', async () => {
     const dto = { caseId: '123e4567-e89b-12d3-a456-426614174000' };
     const res = await controller.create(dto);
-    expect(service.initiateHandover).toHaveBeenCalledWith(dto);
+    expect(service.initiateHandover).toHaveBeenCalledWith(dto, undefined);
     expect(res).toEqual({ id: 'h-1' });
   });
 
@@ -40,6 +40,7 @@ describe('HandoversController', () => {
     );
     expect(service.findOne).toHaveBeenCalledWith(
       '123e4567-e89b-12d3-a456-426614174000',
+      undefined,
     );
     expect(res).toEqual({ id: 'h-1' });
   });
@@ -53,6 +54,7 @@ describe('HandoversController', () => {
     expect(service.completeHandover).toHaveBeenCalledWith(
       '123e4567-e89b-12d3-a456-426614174000',
       dto,
+      undefined,
     );
     expect(res.status).toBe('COMPLETED');
   });
@@ -66,6 +68,7 @@ describe('HandoversController', () => {
     expect(service.rejectHandover).toHaveBeenCalledWith(
       '123e4567-e89b-12d3-a456-426614174000',
       dto,
+      undefined,
     );
     expect(res.status).toBe('REJECTED');
   });
@@ -79,6 +82,7 @@ describe('HandoversController', () => {
     expect(service.cancelHandover).toHaveBeenCalledWith(
       '123e4567-e89b-12d3-a456-426614174000',
       dto,
+      undefined,
     );
     expect(res.status).toBe('CANCELLED');
   });

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,8 +9,10 @@ import {
   AmbulanceStatus,
   AmbulanceType,
   AssignmentStatus,
+  UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-request.js';
 import {
   CreateAmbulanceDto,
   QueryAmbulancesDto,
@@ -154,7 +157,20 @@ export class AmbulancesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthenticatedUser) {
+    if (user) {
+      if (
+        user.role === UserRole.PARAMEDIC ||
+        user.role === UserRole.AMBULANCE_DRIVER
+      ) {
+        if (!user.ambulanceId || user.ambulanceId !== id) {
+          throw new ForbiddenException(
+            'Insufficient permissions: crew can only view details of their own ambulance',
+          );
+        }
+      }
+    }
+
     const ambulance = await this.prisma.ambulance.findUnique({
       where: { id },
       include: {

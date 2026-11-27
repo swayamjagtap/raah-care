@@ -36,6 +36,7 @@ import { App } from 'supertest/types.js';
 import { vi, describe, beforeEach, afterEach, it, expect } from 'vitest';
 import { AppModule } from './../src/app.module.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
+import { E2E_TEST_ADMIN_AUTH_HEADER, E2E_TEST_ADMIN_USER } from './test-auth.helper.js';
 import {
   AmbulanceStatus,
   AssignmentStatus,
@@ -299,6 +300,7 @@ describe('M6.1 — Full Emergency Lifecycle (E2E, mocked Prisma)', () => {
 
   beforeEach(async () => {
     prismaMock = buildPrismaMock();
+    prismaMock.user.findUnique.mockResolvedValue(E2E_TEST_ADMIN_USER);
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -316,6 +318,12 @@ describe('M6.1 — Full Emergency Lifecycle (E2E, mocked Prisma)', () => {
         transform: true,
       }),
     );
+    app.use((req: any, _res: any, next: () => void) => {
+      if (!req.headers.authorization) {
+        req.headers.authorization = E2E_TEST_ADMIN_AUTH_HEADER;
+      }
+      next();
+    });
     await app.init();
   });
 

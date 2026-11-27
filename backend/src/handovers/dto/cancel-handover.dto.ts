@@ -3,7 +3,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -19,10 +18,6 @@ export class CancelHandoverDto {
   })
   @MaxLength(2000)
   reason!: string;
-
-  @IsOptional()
-  @IsUUID()
-  actorId?: string;
 
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>

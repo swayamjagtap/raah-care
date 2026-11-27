@@ -6,10 +6,6 @@ export class CreateAssignmentDto {
   ambulanceId: string;
 
   @IsOptional()
-  @IsUUID()
-  dispatcherId?: string;
-
-  @IsOptional()
   @IsString()
   notes?: string;
 }

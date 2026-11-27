@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { CaseStatus } from '../../../generated/prisma/enums.js';
 
 export class UpdateEmergencyStatusDto {
@@ -11,8 +11,4 @@ export class UpdateEmergencyStatusDto {
   @IsOptional()
   @IsString()
   notes?: string;
-
-  @IsOptional()
-  @IsUUID()
-  actorId?: string;
 }

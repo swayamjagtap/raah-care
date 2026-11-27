@@ -53,7 +53,7 @@ describe('Assignments Controllers', () => {
 
       const result = await nestedController.create('emg-1', dto);
       expect(result).toBe(expected);
-      expect(service.create).toHaveBeenCalledWith('emg-1', dto);
+      expect(service.create).toHaveBeenCalledWith('emg-1', dto, undefined);
     });
 
     it('delegates findAll to service', async () => {
@@ -73,7 +73,7 @@ describe('Assignments Controllers', () => {
 
       const result = await controller.findOne('asg-1');
       expect(result).toBe(expected);
-      expect(service.findOne).toHaveBeenCalledWith('asg-1');
+      expect(service.findOne).toHaveBeenCalledWith('asg-1', undefined);
     });
 
     it('delegates accept to service', async () => {
@@ -83,7 +83,7 @@ describe('Assignments Controllers', () => {
 
       const result = await controller.accept('asg-1', dto);
       expect(result).toBe(expected);
-      expect(service.accept).toHaveBeenCalledWith('asg-1', dto);
+      expect(service.accept).toHaveBeenCalledWith('asg-1', dto, undefined);
     });
 
     it('delegates reject to service', async () => {
@@ -93,7 +93,7 @@ describe('Assignments Controllers', () => {
 
       const result = await controller.reject('asg-1', dto);
       expect(result).toBe(expected);
-      expect(service.reject).toHaveBeenCalledWith('asg-1', dto);
+      expect(service.reject).toHaveBeenCalledWith('asg-1', dto, undefined);
     });
 
     it('delegates updateStatus to service', async () => {
@@ -103,7 +103,7 @@ describe('Assignments Controllers', () => {
 
       const result = await controller.updateStatus('asg-1', dto);
       expect(result).toBe(expected);
-      expect(service.updateStatus).toHaveBeenCalledWith('asg-1', dto);
+      expect(service.updateStatus).toHaveBeenCalledWith('asg-1', dto, undefined);
     });
   });
 });

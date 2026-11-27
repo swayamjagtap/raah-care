@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -8,6 +12,7 @@ import {
   CaseEventType,
   CasePriority,
   CaseStatus,
+  UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AssignmentsService } from './assignments.service.js';
@@ -113,11 +118,19 @@ describe('AssignmentsService', () => {
       prisma.assignment.create.mockResolvedValue(mockAssignment);
       prisma.caseEvent.create.mockResolvedValue({ id: 'evt-1' });
 
-      const result = await service.create('emg-uuid-1', {
-        ambulanceId: 'amb-uuid-1',
-        dispatcherId: 'disp-uuid-1',
-        notes: 'Urgent response',
-      });
+      const mockUser: any = {
+        userId: 'disp-uuid-1',
+        role: UserRole.DISPATCHER,
+      };
+
+      const result = await service.create(
+        'emg-uuid-1',
+        {
+          ambulanceId: 'amb-uuid-1',
+          notes: 'Urgent response',
+        },
+        mockUser,
+      );
 
       expect(result).toEqual(mockAssignment);
       expect(prisma.ambulance.updateMany).toHaveBeenCalledWith({
@@ -207,18 +220,28 @@ describe('AssignmentsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('throws NotFoundException if dispatcherId does not exist', async () => {
+    it('populates null dispatcherId if unauthenticated/no user passed', async () => {
       prisma.emergencyCase.findUnique.mockResolvedValue(mockEmergency);
       prisma.ambulance.findUnique.mockResolvedValue(mockAmbulance);
       prisma.assignment.findFirst.mockResolvedValue(null);
-      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.ambulance.updateMany.mockResolvedValue({ count: 1 });
+      prisma.emergencyCase.update.mockResolvedValue({
+        ...mockEmergency,
+        status: CaseStatus.AMBULANCE_ASSIGNED,
+      });
+      prisma.assignment.create.mockResolvedValue(mockAssignment);
+      prisma.caseEvent.create.mockResolvedValue({ id: 'evt-1' });
 
-      await expect(
-        service.create('emg-uuid-1', {
-          ambulanceId: 'amb-uuid-1',
-          dispatcherId: 'missing-disp',
+      await service.create('emg-uuid-1', {
+        ambulanceId: 'amb-uuid-1',
+      });
+
+      expect(prisma.assignment.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          dispatcherId: null,
         }),
-      ).rejects.toThrow(NotFoundException);
+        include: expect.any(Object),
+      });
     });
 
     it('throws BadRequestException on concurrent assignment conflict (count === 0)', async () => {
@@ -513,6 +536,98 @@ describe('AssignmentsService', () => {
       prisma.emergencyCase.findUnique.mockResolvedValue(null);
 
       await expect(service.findAllForCase('missing-case')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ─── M8.5 Ambulance / Crew Scope Authorization ────────────────────────────
+
+  describe('M8.5 Ambulance / Crew Scope Authorization', () => {
+    const ownAmbulanceId = 'amb-uuid-1';
+    const otherAmbulanceId = 'amb-uuid-2';
+
+    const paramedicUser = {
+      userId: 'para-1',
+      supabaseId: 'sub-para-1',
+      role: UserRole.PARAMEDIC,
+      hospitalId: null,
+      ambulanceId: ownAmbulanceId,
+    };
+
+    const driverUser = {
+      userId: 'driver-1',
+      supabaseId: 'sub-driver-1',
+      role: UserRole.AMBULANCE_DRIVER,
+      hospitalId: null,
+      ambulanceId: ownAmbulanceId,
+    };
+
+    const systemAdminUser = {
+      userId: 'sysadmin-1',
+      supabaseId: 'sub-sysadmin-1',
+      role: UserRole.SYSTEM_ADMIN,
+      hospitalId: null,
+      ambulanceId: null,
+    };
+
+    const ownAssignment = {
+      ...mockAssignment,
+      ambulanceId: ownAmbulanceId,
+      status: AssignmentStatus.ASSIGNED,
+    };
+
+    const otherAssignment = {
+      ...mockAssignment,
+      ambulanceId: otherAmbulanceId,
+      status: AssignmentStatus.ASSIGNED,
+    };
+
+    it('paramedic operating on own ambulance assignment is allowed', async () => {
+      prisma.assignment.findUnique.mockResolvedValue(ownAssignment);
+      prisma.assignment.update.mockResolvedValue({
+        ...ownAssignment,
+        status: AssignmentStatus.ACCEPTED,
+      });
+
+      const result = await service.accept('asg-uuid-1', { notes: 'Ok' }, paramedicUser);
+      expect(result.status).toBe(AssignmentStatus.ACCEPTED);
+    });
+
+    it('paramedic operating on another ambulance assignment throws ForbiddenException (403)', async () => {
+      prisma.assignment.findUnique.mockResolvedValue(otherAssignment);
+
+      await expect(
+        service.accept('asg-uuid-2', { notes: 'Ok' }, paramedicUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('ambulance driver operating on own ambulance assignment is allowed', async () => {
+      prisma.assignment.findUnique.mockResolvedValue(ownAssignment);
+      prisma.assignment.update.mockResolvedValue({
+        ...ownAssignment,
+        status: AssignmentStatus.ACCEPTED,
+      });
+
+      const result = await service.accept('asg-uuid-1', { notes: 'Ok' }, driverUser);
+      expect(result.status).toBe(AssignmentStatus.ACCEPTED);
+    });
+
+    it('ambulance driver operating on another ambulance assignment throws ForbiddenException (403)', async () => {
+      prisma.assignment.findUnique.mockResolvedValue(otherAssignment);
+
+      await expect(
+        service.accept('asg-uuid-2', { notes: 'Ok' }, driverUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('system admin retains access to operate on any assignment', async () => {
+      prisma.assignment.findUnique.mockResolvedValue(otherAssignment);
+      prisma.assignment.update.mockResolvedValue({
+        ...otherAssignment,
+        status: AssignmentStatus.ACCEPTED,
+      });
+
+      const result = await service.accept('asg-uuid-2', { notes: 'Admin override' }, systemAdminUser);
+      expect(result.status).toBe(AssignmentStatus.ACCEPTED);
     });
   });
 });

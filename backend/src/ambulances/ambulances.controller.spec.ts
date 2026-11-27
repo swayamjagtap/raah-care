@@ -64,7 +64,7 @@ describe('AmbulancesController', () => {
 
     const result = await controller.findOne('uuid-1');
     expect(result).toBe(expected);
-    expect(service.findOne).toHaveBeenCalledWith('uuid-1');
+    expect(service.findOne).toHaveBeenCalledWith('uuid-1', undefined);
   });
 
   it('delegates updateStatus to service', async () => {

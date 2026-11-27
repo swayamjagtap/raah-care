@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -7,8 +8,10 @@ import {
   CaseEventType,
   CasePriority,
   CaseStatus,
+  UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-request.js';
 import {
   CreateEmergencyDto,
   QueryEmergenciesDto,
@@ -99,7 +102,7 @@ const STATUS_TO_EVENT_MAP: Partial<Record<CaseStatus, CaseEventType>> = {
 export class EmergenciesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateEmergencyDto) {
+  async create(dto: CreateEmergencyDto, authenticatedUserId?: string | null) {
     if (dto.patientId) {
       const patient = await this.prisma.patient.findUnique({
         where: { id: dto.patientId },
@@ -109,12 +112,22 @@ export class EmergenciesService {
       }
     }
 
-    if (dto.initiatorId) {
+    // Determine trusted initiator identity:
+    // If authenticated user is present in request context, authenticatedUserId is ALWAYS used,
+    // ignoring any client-supplied dto.initiatorId.
+    // If explicitly null (anonymous HTTP request), initiatorId remains null.
+    // If undefined (direct service call in unit tests), falls back to dto.initiatorId.
+    const effectiveInitiatorId =
+      authenticatedUserId !== undefined
+        ? authenticatedUserId
+        : (dto.initiatorId ?? null);
+
+    if (effectiveInitiatorId) {
       const initiator = await this.prisma.user.findUnique({
-        where: { id: dto.initiatorId },
+        where: { id: effectiveInitiatorId },
       });
       if (!initiator) {
-        throw new NotFoundException(`Initiator user with ID '${dto.initiatorId}' not found`);
+        throw new NotFoundException(`Initiator user with ID '${effectiveInitiatorId}' not found`);
       }
     }
 
@@ -133,7 +146,7 @@ export class EmergenciesService {
           notes: dto.notes,
           currentCondition: dto.currentCondition,
           patientId: dto.patientId,
-          initiatorId: dto.initiatorId,
+          initiatorId: effectiveInitiatorId,
         },
       });
 
@@ -141,7 +154,7 @@ export class EmergenciesService {
         data: {
           caseId: createdCase.id,
           eventType: CaseEventType.CASE_CREATED,
-          actorId: dto.initiatorId ?? null,
+          actorId: effectiveInitiatorId ?? null,
           notes: dto.notes ?? 'Emergency case created',
           payload: {
             priority: createdCase.priority,
@@ -226,13 +239,14 @@ export class EmergenciesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthenticatedUser) {
     const emergency = await this.prisma.emergencyCase.findUnique({
       where: { id },
       include: {
         patient: {
           select: {
             id: true,
+            userId: true,
             fullName: true,
             dateOfBirth: true,
             gender: true,
@@ -309,10 +323,25 @@ export class EmergenciesService {
       throw new NotFoundException(`Emergency case with ID '${id}' not found`);
     }
 
+    if (user && user.role === UserRole.PATIENT) {
+      const isOwner =
+        (emergency.initiatorId && emergency.initiatorId === user.userId) ||
+        (emergency.patient?.userId && emergency.patient.userId === user.userId);
+      if (!isOwner) {
+        throw new ForbiddenException(
+          'Insufficient permissions: patient can only access their own emergency case',
+        );
+      }
+    }
+
     return emergency;
   }
 
-  async updateStatus(id: string, dto: UpdateEmergencyStatusDto) {
+  async updateStatus(
+    id: string,
+    dto: UpdateEmergencyStatusDto,
+    user?: AuthenticatedUser,
+  ) {
     const emergency = await this.prisma.emergencyCase.findUnique({
       where: { id },
     });
@@ -360,7 +389,7 @@ export class EmergenciesService {
         data: {
           caseId: id,
           eventType,
-          actorId: dto.actorId ?? null,
+          actorId: user?.userId ?? null,
           notes: dto.notes ?? null,
           payload: {
             fromStatus: emergency.status,

@@ -3,21 +3,12 @@ import {
   IsObject,
   IsOptional,
   IsString,
-  IsUUID,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { VitalsDto } from './vitals.dto.js';
 
 export class UpdateHandoverDto {
-  @IsOptional()
-  @IsUUID()
-  paramedicId?: string;
-
-  @IsOptional()
-  @IsUUID()
-  receivingDoctorId?: string;
-
   @IsOptional()
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim() : value,

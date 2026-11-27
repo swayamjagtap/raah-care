@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -9,6 +10,7 @@ import {
   HospitalStatus,
   ResourceStatus,
   ResourceType,
+  UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { HospitalsService } from './hospitals.service.js';
@@ -678,6 +680,73 @@ describe('HospitalsService', () => {
           quantity: 20,
         }),
       ).rejects.toThrow('Hospital resource unique constraint violation');
+    });
+  });
+
+  // ─── M8.5 Hospital Scope Authorization ────────────────────────────────────
+
+  describe('M8.5 Hospital Scope Authorization', () => {
+    const ownHospitalId = 'hosp-uuid-1';
+    const otherHospitalId = 'hosp-uuid-2';
+
+    const doctorUser = {
+      userId: 'doc-1',
+      supabaseId: 'sub-doc-1',
+      role: UserRole.DOCTOR,
+      hospitalId: ownHospitalId,
+      ambulanceId: null,
+    };
+
+    const hospitalAdminUser = {
+      userId: 'admin-1',
+      supabaseId: 'sub-admin-1',
+      role: UserRole.HOSPITAL_ADMIN,
+      hospitalId: ownHospitalId,
+      ambulanceId: null,
+    };
+
+    const systemAdminUser = {
+      userId: 'sysadmin-1',
+      supabaseId: 'sub-sysadmin-1',
+      role: UserRole.SYSTEM_ADMIN,
+      hospitalId: null,
+      ambulanceId: null,
+    };
+
+    it('doctor accessing own hospital resources is allowed', async () => {
+      prisma.hospital.findUnique.mockResolvedValue(mockHospital);
+      prisma.hospitalResource.findMany.mockResolvedValue([mockResource]);
+
+      const result = await service.findResources(ownHospitalId, doctorUser);
+      expect(result).toHaveLength(1);
+    });
+
+    it('doctor accessing another hospital resources throws ForbiddenException (403)', async () => {
+      await expect(
+        service.findResources(otherHospitalId, doctorUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('hospital admin accessing own hospital resources is allowed', async () => {
+      prisma.hospital.findUnique.mockResolvedValue(mockHospital);
+      prisma.hospitalResource.findMany.mockResolvedValue([mockResource]);
+
+      const result = await service.findResources(ownHospitalId, hospitalAdminUser);
+      expect(result).toHaveLength(1);
+    });
+
+    it('hospital admin accessing another hospital resources throws ForbiddenException (403)', async () => {
+      await expect(
+        service.findResources(otherHospitalId, hospitalAdminUser),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('system admin bypasses hospital scope where blueprint permits', async () => {
+      prisma.hospital.findUnique.mockResolvedValue(mockHospital);
+      prisma.hospitalResource.findMany.mockResolvedValue([mockResource]);
+
+      const result = await service.findResources(otherHospitalId, systemAdminUser);
+      expect(result).toHaveLength(1);
     });
   });
 });
